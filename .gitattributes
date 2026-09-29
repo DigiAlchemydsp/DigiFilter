@@ -1,0 +1,5 @@
+# Never let Git's text filters touch binaries (core.autocrlf would corrupt
+# .elemod/.syx: they can be NUL-free but are not text).
+*.elemod binary
+*.syx binary
+*.zip binary

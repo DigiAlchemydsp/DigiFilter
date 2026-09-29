@@ -1,0 +1,760 @@
+{
+ "elemod": 2,
+ "id": "digifilter",
+ "version": "1.0h",
+ "title": "Digi Filter",
+ "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ and RESO: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs). Widens the Filter Type range to 11 and renames the new values, and runs the extra DSP at the per-voice filter call (site 0x400780ba -> digifilter_dispatch). Stock TYPE values tail-call the stock filter untouched. WIP: the FLTR page's FREQ/RES response curve does not yet reflect the new types. See README.md.",
+ "category": "Sound",
+ "author": "Digital Alchemy DSP",
+ "license": "GPL-2.0-or-later",
+ "target": {
+  "device": "digitakt-mk1",
+  "product": "Digitakt mk1",
+  "os": "1.53",
+  "syx_sha256": "9bdd44bb6102fb25c143cfab97bc92b7a89c463f795d3112dce89771e29bcc92",
+  "section3_sha256": "4b47a9507758ca5669ca02ab2c0374d2c04c98aece445408295cc1dcb265c5df",
+  "section3_len": 2475584
+ },
+ "sections": {
+  ".run": {
+   "align": 8,
+   "len": 2956,
+   "parts": [
+    [
+     "hex",
+     "202f0008e0800c80000000086d200c800000000c6c185180e78841fa001cd1c0226f000c121812c14a0166f84e754ef9400653360000000042500000000000004250320000000000434f4d420000000054524153480000002f012f09068080001a184ab900000000660e23cb00000000720123c100000000224312110c0100086d0e0c01000c6c0847f9000000006006267900000000225f221f"
+    ],
+    [
+     "stock",
+     "0x4000441c",
+     8
+    ],
+    [
+     "hex",
+     "00fc222f001c2e01"
+    ],
+    [
+     "stock",
+     "0x4000f334",
+     8
+    ],
+    [
+     "hex",
+     "4a816d7e20026d762a002c077bc57dc64240484042474847b38228054c0648004c0068004c0758004c0078002004220673c1424048404246484679c42041220573c1d08842454845d08122004841424142404840da86de858284d0874a826c0a448157c24680750290827420e6a99483e5a8"
+    ],
+    [
+     "stock",
+     "0x4006a7b0",
+     8
+    ],
+    [
+     "hex",
+     "80814e7544806086448720026c8060f4"
+    ],
+    [
+     "stock",
+     "0x40002cfa",
+     8
+    ],
+    [
+     "hex",
+     "202f002041f900000000246f002828700c007001b0af001c670000a4202f0024263cf800000041f900000000741e4878001b2a700c002f3c080000002543000c2f0d47faff144e93508f2e824874d8002540001042aa00142f0c4e93307c00204fef000c4282223c0080000006800100000026015388d68397834483d281d4824a836604b28065067601928084834a8866e04878001b2f0224822f0c4e93508f721b2e812f00254000042f0c4e93254000084cef3c0c"
+    ],
+    [
+     "stock",
+     "0x400a527e",
+     8
+    ],
+    [
+     "hex",
+     "202f0024e28041f900000000741e4878001b263cf80000002f3c080000002a700c002543000c47fafe722f0d4e93508f2e824874d8002540001042aa00142f0c4e934fef000c4282307c0020223c008000000680010000006000ff5a"
+    ],
+    [
+     "stock",
+     "0x40010026",
+     8
+    ],
+    [
+     "hex",
+     "2e2f0048740a2207e5a9202f004041f9000000007a03484571f00a002441d5fc000000004c6f0800004c7202b2806c102a3c00ff00000c80000000ff6f00014a2c2f0044741741f900000000e5ae4ab07c00670000de41f9000000009bcd43f9000000002f48002c20717c0047f9000000002f49003022737c002f4b003447f90000000024337c0049fafdac266f003c26059688ec8320069089ee80528dd6882203484148c128002002d889908171802200538173812c720c004878001022321c00928e2f013f0342674e94508f721b2e8148760800"
+    ],
+    [
+     "stock",
+     "0x40011ce4",
+     8
+    ],
+    [
+     "hex",
+     "22442043d0930c80f80000006c06203cf80000000c80080000006f06203c0800000025802c00528226c070207582b08d6680266f"
+    ],
+    [
+     "stock",
+     "0x400dcd66",
+     10
+    ],
+    [
+     "hex",
+     "27827c0021837c0023847c00"
+    ],
+    [
+     "stock",
+     "0x400100aa",
+     8
+    ],
+    [
+     "hex",
+     "4e75700121807c00303c010043f90000000041f9000000002f49003047f90000000043f90000000021857c0027867c0042b17c002f4b00342f49002c204a4298538066fa224620454282266f003c9bcd49fafcb46000ff0a2a00484542456000feb04fefffb0700748d77cfc206f0054242f0060b082650000ae7190720326005183b283650000a038280002123c007f79c4e08cb2846d0000b6"
+    ],
+    [
+     "stock",
+     "0x400e12c4",
+     10
+    ],
+    [
+     "hex",
+     "800015383a10720b7bc5e2ad123c000fb2856d00009041f900000000b0b02c00673021802c002002e78843f90000000042b12c0041f90000000043f90000000042b12c00"
+    ],
+    [
+     "stock",
+     "0x40072dc2",
+     8
+    ],
+    [
+     "hex",
+     "0000000042907001b0836c0000907002b083676e487800022f022f052f042f2f00684ebafdb44fef0014"
+    ],
+    [
+     "stock",
+     "0x4008e87e",
+     8
+    ],
+    [
+     "hex",
+     "00504e752f022f2f00602f2f00602f084eb940072844"
+    ],
+    [
+     "stock",
+     "0x4006f28e",
+     8
+    ],
+    [
+     "hex",
+     "42804fef00504e757a0f6000ff6e726a787f"
+    ],
+    [
+     "stock",
+     "0x400d3034",
+     8
+    ],
+    [
+     "hex",
+     "800015383a10720b7bc5e2ad123c000fb2856c00ff4c60d6487800012f022f052f042f2f00684ebafd464fef00147001609041f90000000024702c004a8a670000b841f9000000009dce2f48003041f9000000002f48003441f90000000028702c0041f9000000002a702c002005908d2f40002c20022444e7882c2f002c95cc2e0a2640d7fc000000002006e4802207e481486f0038de8a48750800487418002f034ebafba82f0b486f004c48780008206f00744870e800dcaf004c4eb9000000004dee0020"
+    ],
+    [
+     "stock",
+     "0x4003723a",
+     8
+    ],
+    [
+     "hex",
+     "008066b8206f0030700121842c00206f003421852c0041f90000000021802c00"
+    ],
+    [
+     "stock",
+     "0x400376a6",
+     10
+    ],
+    [
+     "hex",
+     "20022844e78841f9000000009dce2f48003042af002c41f9000000002a452e0a2f4800342c2f002c2640d7fc000000006000ff602079000000004a8867404a90673c7007b0af00046534226f00044ab09c046d2a22092009e789eb882241d3fc000000002f09908148700824"
+    ],
+    [
+     "stock",
+     "0x400c0646",
+     8
+    ],
+    [
+     "hex",
+     "4eb900000000"
+    ],
+    [
+     "stock",
+     "0x4000831a",
+     8
+    ],
+    [
+     "hex",
+     "ffd8700148d73cfc2c3900000000428128394199dc4424442e04068700000576b186103cffe449fafaaa45ea00664c0608002a40dbfc000000002a0d5885240d2645"
+    ],
+    [
+     "stock",
+     "0x4001c0c8",
+     8
+    ],
+    [
+     "hex",
+     "70064298538066fa76ff26834a84670c103c000377d25183b0836450588b45ea00a2068200000018be8a66d22a8123c60000000023cd0000000041f90000000043f9000000002445201ab0906708429142a90004208058885089b1fc0000000066e6"
+    ],
+    [
+     "stock",
+     "0x400715ec",
+     10
+    ],
+    [
+     "hex",
+     "2f02720f71aa0004"
+    ],
+    [
+     "stock",
+     "0x40013a82",
+     8
+    ],
+    [
+     "hex",
+     "727f71aa0002b2806c02707f2f002f034e942683588b45ea00a206820000001872014fef0010be8a6600ff58608242804e7500004fefffb448d77fffa9802f40003ca1802f400040ab802f40"
+    ],
+    [
+     "stock",
+     "0x400ed222",
+     8
+    ],
+    [
+     "hex",
+     "7000a100ab00206f00502e2f0054226f0058245126690004286900082a69000c2c6900102c290014226f005c28112a2900042f4900484a8767000052201022009285a80a0800a20b0800a1c2a80b0800a20c0800a1c3d6852202d281928428012203d28192852a01a00d0800a40e0800a6060800a1c1e981d08120805888538766ba226f0048228423450004202f0040a100202f0044ab00202f003ca9004cd77fff4fef004c4e75ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00f500e800db00d000c500ba00b000a7009e0096008e0086007f00790072006c00660061005c00570052004e004a00460042003f003b0038003500320030002d002b00290026002400220021001f001d001c001a001900180016001500140013001200110010000f000e000e000d000c000c000b000a000a000900090008000800080007000700060006000600050005000500050004000400040004000400030003000300030003000300021aaaaaab156c96df11365b020dd418640b1c22d508ecff70072bc84c05c2e13904a0ed9f03b7faad02fcd3900266777401edaaa4018c9d70013ea4a4010000000002ae4b0002d4a80002fd29000327ef00035518000384c80003b7220003ec4d0004247000045fb700049e4e0004e0650005262e00056fdd0005bdaa00060fd1000666900006c228000722de000788fd0007f4d1000866ac0008dee400095dd50009e3de000a7166000b06d7000ba4a2000c4b40000cfb2e000db4f2000e7918000f4836001022e7001109d30011fda80012ff1e00140ef900152e0700165d2200179d300018ef22001a53fa001bccc6001d5aa5001efec30020ba5f00228ecc00247d6b002687b50028af36002af591002d5c82002fe5db0032938b0035679b00386433003b8b9a003ee0360042649300461b60004a0774004e2bce00528b9b00572a37005c0b2c0061323d0066a360006c62ca007274ed0078de7f007fa47b0086cc2b008e5b2800965761009ec72300a7b11d00b11c6700bb108c00c5959200d0b40100dc74f100e8e21200f605bb0103eafa01129da101222a5a01329eba0144095e015679fc016a018d017eb2650194a06701abe12a01c48c3601debb4401fa8a86021819040237890402590089027ca9ea02a2b48802cb55ae02f6c99a032554d2035745b4038cf68103c6cfd904054bf10448faab049286db04e2bd3d053a95a4059b3f55060631f1067d44ef0702d0e10799dfaf08467426090df75a09f7e5510b0ee85e0c62bfec0e0bb44810314d0813188d581745cff71ddb3d74"
+    ]
+   ]
+  },
+  ".bss": {
+   "align": 4,
+   "size": 8984
+  }
+ },
+ "symbols": {
+  "nf_names": [
+   ".run",
+   56
+  ],
+  "mulsh": [
+   ".run",
+   156
+  ],
+  "mode_coef": [
+   ".run",
+   316
+  ],
+  "G27": [
+   ".run",
+   2444
+  ],
+  "K27": [
+   ".run",
+   2380
+  ],
+  "comb_run.constprop.0": [
+   ".run",
+   606
+  ],
+  "COMB_DELAY": [
+   ".run",
+   2124
+  ],
+  "comb_buf": [
+   ".bss",
+   256
+  ],
+  "comb_init": [
+   ".bss",
+   192
+  ],
+  "comb_pos": [
+   ".bss",
+   224
+  ],
+  "comb_dly": [
+   ".bss",
+   160
+  ],
+  "comb_g": [
+   ".bss",
+   128
+  ],
+  "prev_filt_type": [
+   ".bss",
+   96
+  ],
+  "dsp_st": [
+   ".bss",
+   8448
+  ],
+  "svf_have": [
+   ".bss",
+   0
+  ],
+  "svf_fi": [
+   ".bss",
+   64
+  ],
+  "svf_qi": [
+   ".bss",
+   32
+  ],
+  "cur": [
+   ".bss",
+   8512
+  ],
+  "sets": [
+   ".bss",
+   8516
+  ],
+  "prev_mode": [
+   ".run",
+   2092
+  ],
+  "digifilter_typefmt": [
+   ".run",
+   0
+  ],
+  "digifilter_voice": [
+   ".run",
+   1564
+  ],
+  "digifilter_live": [
+   ".bss",
+   8972
+  ],
+  "digifilter_disp_got": [
+   ".bss",
+   8976
+  ],
+  "digifilter_disp_orig": [
+   ".bss",
+   8980
+  ],
+  "digifilter_dispatch": [
+   ".run",
+   88
+  ],
+  "digifilter_tick": [
+   ".run",
+   1640
+  ],
+  "digifilter_filt": [
+   ".run",
+   1016
+  ],
+  "digifilter_enc": [
+   ".run",
+   1886
+  ],
+  "digifilter_svf": [
+   ".run",
+   1892
+  ]
+ },
+ "exports": [
+  "digifilter_disp_got",
+  "digifilter_disp_orig",
+  "digifilter_dispatch",
+  "digifilter_enc",
+  "digifilter_filt",
+  "digifilter_live",
+  "digifilter_svf",
+  "digifilter_tick",
+  "digifilter_typefmt",
+  "digifilter_voice"
+ ],
+ "imports": [],
+ "weak": [],
+ "relocs": [
+  [
+   ".run",
+   100,
+   "abs32",
+   "sec:.bss",
+   8976
+  ],
+  [
+   ".run",
+   108,
+   "abs32",
+   "sec:.bss",
+   8980
+  ],
+  [
+   ".run",
+   116,
+   "abs32",
+   "sec:.bss",
+   8976
+  ],
+  [
+   ".run",
+   146,
+   "abs32",
+   "sec:.bss",
+   8980
+  ],
+  [
+   ".run",
+   138,
+   "abs32",
+   "sec:.run",
+   1016
+  ],
+  [
+   ".run",
+   646,
+   "abs32",
+   "sec:.bss",
+   256
+  ],
+  [
+   ".run",
+   1158,
+   "abs32",
+   "sec:.bss",
+   8452
+  ],
+  [
+   ".run",
+   1398,
+   "abs32",
+   "sec:.bss",
+   8448
+  ],
+  [
+   ".run",
+   1556,
+   "abs32",
+   "sec:.bss",
+   8448
+  ],
+  [
+   ".run",
+   1608,
+   "abs32",
+   "sec:.bss",
+   8448
+  ],
+  [
+   ".run",
+   1696,
+   "abs32",
+   "sec:.bss",
+   8516
+  ],
+  [
+   ".run",
+   1764,
+   "abs32",
+   "sec:.bss",
+   8512
+  ],
+  [
+   ".run",
+   1770,
+   "abs32",
+   "sec:.bss",
+   8972
+  ],
+  [
+   ".run",
+   1808,
+   "abs32",
+   "sec:.run",
+   2124
+  ],
+  [
+   ".run",
+   330,
+   "abs32",
+   "sec:.run",
+   2444
+  ],
+  [
+   ".run",
+   364,
+   "abs32",
+   "sec:.run",
+   2380
+  ],
+  [
+   ".run",
+   522,
+   "abs32",
+   "sec:.run",
+   2380
+  ],
+  [
+   ".run",
+   630,
+   "abs32",
+   "sec:.run",
+   2124
+  ],
+  [
+   ".run",
+   686,
+   "abs32",
+   "sec:.bss",
+   192
+  ],
+  [
+   ".run",
+   702,
+   "abs32",
+   "sec:.bss",
+   224
+  ],
+  [
+   ".run",
+   710,
+   "abs32",
+   "sec:.bss",
+   160
+  ],
+  [
+   ".run",
+   724,
+   "abs32",
+   "sec:.bss",
+   128
+  ],
+  [
+   ".run",
+   742,
+   "abs32",
+   "sec:.bss",
+   224
+  ],
+  [
+   ".run",
+   932,
+   "abs32",
+   "sec:.bss",
+   160
+  ],
+  [
+   ".run",
+   938,
+   "abs32",
+   "sec:.bss",
+   160
+  ],
+  [
+   ".run",
+   948,
+   "abs32",
+   "sec:.bss",
+   128
+  ],
+  [
+   ".run",
+   954,
+   "abs32",
+   "sec:.bss",
+   224
+  ],
+  [
+   ".run",
+   1106,
+   "abs32",
+   "sec:.bss",
+   96
+  ],
+  [
+   ".run",
+   1126,
+   "abs32",
+   "sec:.bss",
+   192
+  ],
+  [
+   ".run",
+   1136,
+   "abs32",
+   "sec:.bss",
+   8448
+  ],
+  [
+   ".run",
+   1142,
+   "abs32",
+   "sec:.bss",
+   0
+  ],
+  [
+   ".run",
+   1316,
+   "abs32",
+   "sec:.bss",
+   0
+  ],
+  [
+   ".run",
+   1332,
+   "abs32",
+   "sec:.bss",
+   64
+  ],
+  [
+   ".run",
+   1344,
+   "abs32",
+   "sec:.bss",
+   32
+  ],
+  [
+   ".run",
+   1354,
+   "abs32",
+   "sec:.bss",
+   64
+  ],
+  [
+   ".run",
+   1364,
+   "abs32",
+   "sec:.bss",
+   32
+  ],
+  [
+   ".run",
+   1454,
+   "abs32",
+   "sec:.run",
+   1892
+  ],
+  [
+   ".run",
+   1494,
+   "abs32",
+   "sec:.bss",
+   0
+  ],
+  [
+   ".run",
+   1520,
+   "abs32",
+   "sec:.bss",
+   64
+  ],
+  [
+   ".run",
+   1536,
+   "abs32",
+   "sec:.bss",
+   32
+  ],
+  [
+   ".run",
+   1566,
+   "abs32",
+   "sec:.bss",
+   8972
+  ],
+  [
+   ".run",
+   1630,
+   "abs32",
+   "sec:.run",
+   1892
+  ],
+  [
+   ".run",
+   1652,
+   "abs32",
+   "sec:.bss",
+   8512
+  ],
+  [
+   ".run",
+   1776,
+   "abs32",
+   "sec:.run",
+   2092
+  ],
+  [
+   ".run",
+   1782,
+   "abs32",
+   "sec:.bss",
+   8448
+  ]
+ ],
+ "sites": [
+  {
+   "addr": "0x401aa45c",
+   "len": 4,
+   "stock_sha256": "34aa8b53f20336a9858eff161c37fb0365c45e9f8e5fbdf3457982f2139ef491",
+   "new": "00000b00",
+   "kind": "data",
+   "relocs": []
+  },
+  {
+   "addr": "0x401539b2",
+   "len": 4,
+   "stock_sha256": "dce9cb4a537a68066aeea3790927793c58cb83a8b52eeff2e2075bbae042007c",
+   "new": "00000000",
+   "kind": "data",
+   "relocs": [
+    [
+     0,
+     "abs32",
+     "sym:digifilter_typefmt",
+     0
+    ]
+   ]
+  },
+  {
+   "addr": "0x400780ba",
+   "len": 6,
+   "stock_sha256": "5ac82a0085016c2b2546f46a0d0840875adbb0ac11cbeed44e624e1a2fbc76c9",
+   "new": "4eb900000000",
+   "kind": "code",
+   "relocs": [
+    [
+     2,
+     "abs32",
+     "sym:digifilter_dispatch",
+     0
+    ]
+   ]
+  }
+ ],
+ "collections": {},
+ "contribute": [
+  {
+   "to": "ev_tick",
+   "order": 50,
+   "data": "00000000",
+   "relocs": [
+    [
+     0,
+     "abs32",
+     "sym:digifilter_tick",
+     0
+    ]
+   ],
+   "claims": []
+  }
+ ],
+ "copied": [],
+ "resources": {
+  "names": [
+   "sound:filter TYPE values (Digi Filter modes)"
+  ]
+ },
+ "requires": [
+  "core"
+ ],
+ "conflicts": [],
+ "build": {
+  "sources": {
+   "filter.c": "0ff9377ce423f30af794d7b15f0f953bc0a628faf7f87bca57921d8b8a8db960",
+   "filter_dsp.s": "8c01ea710719e95baa4d31840ab1b69ff4c00bb50e2cb196d469aa537ba813ec",
+   "filter_glue.s": "6b0ccbc93c1245fe33eca448bbdf2a5ee8296a958a92e8bd8125ca76dbf09164"
+  }
+ },
+ "signature": null
+}
