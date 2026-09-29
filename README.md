@@ -1,6 +1,7 @@
 # DigiFilter
 
-**Extra per-track filter modes for the Elektron Digitakt mk1 (OS 1.53).**
+**Work in progress (WIP).** Extra per-track filter modes for the Elektron
+Digitakt mk1 (OS 1.53).
 
 A format-2 [elekloader](https://github.com/irpina/elekloader) mod, id
 `digifilter`. It adds four filter types on top of the stock `OFF / LP / HP /
@@ -18,6 +19,17 @@ envelope, exactly like the stock types. Stock TYPE values keep running the
 stock filter — nothing here reimplements a stock mode.
 
 > Digitakt **mk1 only**. Digitakt II's filter machines are out of scope.
+
+## Status (WIP)
+
+The **audio path is done and validated** (BP / BP2 / COMB / TRASH, with
+smoothing), but the **UI is not finished**: the FLTR page's FREQ/RES **response
+curve** still only draws up to `EQ:5` and does not reflect the new types. The
+graph is drawn by page UI code from UI-model state (not from the filter RAM), so
+extending it is still open work. See [RE_NOTES.md](RE_NOTES.md) "Open items".
+
+Everything in this repo builds (`BUILT`), lints against `core` and combines with
+`digihealth` (`OK: the mods combine`); the remaining gap is that UI drawing.
 
 ## How it works
 
