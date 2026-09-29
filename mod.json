@@ -1,0 +1,32 @@
+{
+ "id": "digifilter",
+ "version": "1.0h",
+ "title": "Digi Filter",
+ "category": "Sound",
+ "author": "you",
+ "license": "GPL-2.0-or-later",
+ "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ and RESO: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs). Widens the Filter Type range to 11 and renames the new values, and runs the extra DSP at the per-voice filter call (site 0x400780a4 -> digifilter_filt). Stock TYPE values tail-call the stock filter untouched. See HANDOFF.md.",
+ "device": "digitakt-mk1",
+ "os": "1.53",
+ "sources": [
+  "filter.c",
+  "filter_dsp.s",
+  "filter_glue.s"
+ ],
+ "sites": [
+  {"addr": "0x401aa45c", "stock": "00000700", "op": "bytes", "new": "00000b00", "kind": "data"},
+  {"addr": "0x401539b2", "stock": "40065336", "op": "ptr", "target": "digifilter_typefmt"},
+  {"addr": "0x400780ba", "stock": "068080001a18", "op": "jsr", "target": "digifilter_dispatch"}
+ ],
+ "subscribe": [
+  {"event": "ev_tick", "fn": "digifilter_tick", "order": 50}
+ ],
+ "requires": [
+  "core"
+ ],
+ "resources": {
+  "names": [
+   "sound:filter TYPE values (Digi Filter modes)"
+  ]
+ }
+}

@@ -1,0 +1,17 @@
+# Build output and derived firmware — never committed.
+out/
+work/
+*.elemod
+*.syx
+*.bin
+*.img
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors / OS
+*.swp
+*~
+Thumbs.db
+desktop.ini
