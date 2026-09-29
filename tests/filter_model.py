@@ -11,7 +11,7 @@ in filter.c are checked against, and what the emulator test compares to.
 Modes:
     BP     band-pass, mix (0, k, 0)
     BP2    band-pass with ~half the Q (a wider curve): same mix, k from K27[qi>>1]
-(COMB and PHASER are delay-based, not SVF mixes, and are not modelled here.)
+COMB/TRASH are feedback combs (not SVF mixes) and use `comb_gain` instead.
 
 with k = 1/Q. The SVF transfer functions are H_lp = 1/D, H_bp = s/D,
 D = s^2 + k*s + 1, so H_BP = k*H_bp relative to the input.
@@ -23,7 +23,7 @@ MODES = {"BP": (0.0, 1.0, 0.0)}             # BP2 is the same mix at a lower Q
 
 
 def mix(mode, k):
-    """-> the (m0, m1, m2) of `mode` at 1/Q = k. NOTCH/AP/PEAK carry the k."""
+    """-> the (m0, m1, m2) of `mode` at 1/Q = k (m1 carries the k)."""
     m0, m1, m2 = MODES[mode]
     return m0, m1 * k, m2
 
@@ -45,14 +45,6 @@ def comb_gain(f, fs, d, g):
     """|H| of the feedback comb y = x + g*y[n-D] at frequency f."""
     z = cmath.exp(-2j * math.pi * f / fs)
     return abs(1.0 / (1.0 - g * z ** d))
-
-
-def phaser_gain(f, fs, a, depth, stages=4):
-    """|H| of `stages` first-order all-pass sections H=(z^-1-a)/(1-a z^-1),
-    mixed as out = x + depth*ap (the same shape as filter.c's phaser)."""
-    z = cmath.exp(-2j * math.pi * f / fs)
-    h1 = (z - a) / (1.0 - a * z)
-    return abs(1.0 + depth * h1 ** stages)
 
 
 def svf_block(mode, x, fs, fc, q):

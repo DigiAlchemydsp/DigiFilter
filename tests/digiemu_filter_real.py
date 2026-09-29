@@ -32,7 +32,7 @@ HZ = [int(x) for x in re.findall(r"\d+", txt.split("HZ[128]")[1].split("};")[0])
 QX10 = [int(x) for x in re.findall(r"\d+", txt.split("QX10[16]")[1].split("};")[0])]
 G27 = [int(x) for x in re.findall(r"\d+", txt.split("G27[128]")[1].split("};")[0])]
 COMB_D = [int(x) for x in re.findall(r"\d+", txt.split("COMB_DELAY[128]")[1].split("};")[0])]
-MODES = ["BP", "BP2", "COMB", "PHASER"]
+MODES = ["BP", "BP2", "COMB", "TRASH"]
 
 FW = os.path.join(a.digiemu, "portable", "firmware", a.fw)
 sys.path.insert(0, a.digiemu)

@@ -18,11 +18,13 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.environ.get("ELEKLOADER", r"C:\Users\benan\Music\ELEKTRON\elekloader"))
+_el = os.environ.get("ELEKLOADER")
+if _el:
+    sys.path.insert(0, _el)
 from elekloader import formats  # noqa: E402
 from elekloader.isa import coldfire  # noqa: E402
 
-STOCK = os.environ.get("STOCK", r"C:\Users\benan\Music\ELEKTRON\Digitakt_OS1.53.syx")
+STOCK = os.environ.get("STOCK", "")
 _cache = {}
 
 

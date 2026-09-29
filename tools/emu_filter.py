@@ -12,7 +12,9 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.environ.get("ELEKLOADER", r"C:\Users\benan\Music\ELEKTRON\elekloader"))
+_el = os.environ.get("ELEKLOADER")
+if _el:
+    sys.path.insert(0, _el)
 from elekloader import formats  # noqa: E402
 
 from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN, UC_HOOK_CODE, UC_HOOK_MEM_WRITE  # noqa: E402
@@ -20,7 +22,7 @@ from unicorn.m68k_const import (  # noqa: E402
     UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_A2,
     UC_M68K_REG_A6, UC_M68K_REG_A7, UC_M68K_REG_PC, UC_M68K_REG_SR)
 
-STOCK = os.environ.get("STOCK", r"C:\Users\benan\Music\ELEKTRON\Digitakt_OS1.53.syx")
+STOCK = os.environ.get("STOCK", "")
 BASE = 0x40000400
 IMGSIZE = 0x400000
 FILTER = 0x400757FE

@@ -167,19 +167,21 @@ static void commit(void)
 
 /* The render calls, per voice, the stock per-voice filter
  *   0x40072844(params, buffer, active, voice)
- * at 0x400780c4, with a3 = the function address loaded by
- *   0x400780a4  lea 0x40072844,%a3            (stock: 47 f9 40 07 28 44)
- * mod.json points that `lea`'s immediate at digifilter_filt below.
+ * at 0x400780c4, through a3. mod.json hooks the instruction just before the
+ * call, 0x400780ba (`addil #0x80001a18,%d0`), with digifilter_dispatch
+ * (filter_glue.s); the dispatcher points a3 at digifilter_filt for our TYPE
+ * values and restores the original target otherwise, so a profiling wrapper
+ * another mod installed (e.g. digihealth) keeps working.
  *
  *   params  per-voice record, byte 0 = the track's Filter Type
  *           (0x800027a4 + voice*0x6a; raw, unclamped)
  *   buffer  this voice's 32 audio frames (int32), filtered in place
  *           (0x80001a18 + voice*0x80)
- *   active  voice-sounding mask bit (0/1)
+ *   active  voice-sounding mask bit (0/1) — the stock function ignores it
  *   voice   0..7
  *
  * For a stock TYPE we tail-call the stock function, so stock sounds are
- * untouched; for our TYPE values (>= FM_FIRST_TYPE) we run the extra SVF. */
+ * untouched; for our TYPE values (>= FM_FIRST_TYPE) we run our DSP. */
 /* CUTOFF comes from params@2, the field the stock per-voice filter 0x40072844
  * reads (word = FREQ index<<8). It tracks FLTR encoder E (FREQ) exactly like
  * the stock types (verified live). RESO comes from the engine's per-voice

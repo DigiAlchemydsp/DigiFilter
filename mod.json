@@ -3,9 +3,9 @@
  "version": "1.0h",
  "title": "Digi Filter",
  "category": "Sound",
- "author": "you",
+ "author": "Digital Alchemy DSP",
  "license": "GPL-2.0-or-later",
- "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ and RESO: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs). Widens the Filter Type range to 11 and renames the new values, and runs the extra DSP at the per-voice filter call (site 0x400780a4 -> digifilter_filt). Stock TYPE values tail-call the stock filter untouched. See HANDOFF.md.",
+ "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ and RESO: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs). Widens the Filter Type range to 11 and renames the new values, and runs the extra DSP at the per-voice filter call (site 0x400780ba -> digifilter_dispatch). Stock TYPE values tail-call the stock filter untouched. See README.md.",
  "device": "digitakt-mk1",
  "os": "1.53",
  "sources": [

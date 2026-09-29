@@ -18,11 +18,13 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.environ.get("ELEKLOADER", r"C:\Users\benan\Music\ELEKTRON\elekloader"))
+_el = os.environ.get("ELEKLOADER")
+if _el:
+    sys.path.insert(0, _el)
 from elekloader import formats  # noqa: E402
 
-STOCK = os.environ.get("STOCK", r"C:\Users\benan\Music\ELEKTRON\Digitakt_OS1.53.syx")
-OBJDUMP = os.environ.get("ELEKTOOL_OD", r"C:\SysGCC\m68k-elf\bin\m68k-elf-objdump.exe")
+STOCK = os.environ.get("STOCK", "")
+OBJDUMP = os.environ.get("ELEKTOOL_OD", "m68k-elf-objdump")
 MACHINE = "m68k:cfv4e"
 
 

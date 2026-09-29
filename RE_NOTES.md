@@ -3,8 +3,7 @@
 **Device: Digitakt mk1, OS 1.53 only.** Image = stock main OS at `0x40000400`,
 len 2475584, sha256 `4b47a950…c5df` (`.syx` sha256 `9bdd44bb…`).
 
-Marks: **[S]** static (image bytes), **[L]** verified live in digiemu
-(`C:\Users\benan\Music\ELEKTRON\digiemu-main`, setup in HANDOFF §1).
+Marks: **[S]** static (image bytes), **[L]** verified live in digiemu.
 
 Method: `tools/disas.py` (`m68k-elf-objdump -m m68k:cfv4e`) for real
 disassembly; headless digiemu runs (`tests/digiemu_*.py`) for live confirmation.
@@ -70,12 +69,15 @@ a3@0x10`, rejected if `> 11` at `0x4007990e`). Relevant to persistence (§8).
 
 ## 6. THE INTEGRATION POINT — per-voice filter call [S][L]
 
+The render's voice loop calls the stock per-voice filter through `a3`:
+
 ```
-0x400780a4  lea 0x40072844,%a3     ; stock bytes 47 f9 40 07 28 44  <- ptr site
+0x400780a4  lea 0x40072844,%a3     ; a3 = the target (digihealth rewrites this)
 0x400780aa  movel d6,d0 ; lsll d2,d0 ; andl d4,d0
 0x400780b2  movel d0,-(sp)          ; arg3 = active mask bit
-0x400780b4  movel d2,d0 ; lsll #7,d0 ; addi.l #0x80001a18,d0
-0x400780c0  movel d0,-(sp)          ; arg2 = buffer = 0x80001a18 + v*0x80
+0x400780b4  movel d2,d0 ; lsll #7,d0
+0x400780ba  addil #0x80001a18,d0    ; buffer = 0x80001a18 + v*0x80  <- our jsr site
+0x400780c0  movel d0,-(sp)          ; arg2 = buffer
 0x400780c2  movel d3,-(sp)          ; arg1 = params = 0x800027a4 + v*0x6a
 0x400780c4  jsr %a3@                ; arg4 (pushed first) = voice index
 0x400780c6  addi.l #106,%d3         ; next voice
@@ -87,40 +89,37 @@ Function `0x40072844(params, buffer, active, voice)`:
 |---|---|---|
 | params | `0x800027a4 + v*0x6a` | per-voice record; **byte 0 = TYPE** [L] |
 | buffer | `0x80001a18 + v*0x80` | this voice's audio, **32 × int32**, in place |
-| active | 0/1 | voice-sounding mask |
+| active | 0/1 | mask bit; the stock function ignores it |
 | voice | 0..7 | voice == track for the checked tracks |
 
-The function computes a general biquad (coeffs `0x8000f584 + v*0x20`, state
-`0x8000f3c4 + v*0x20`, plus `0x8000f5a4 + v*8`) and applies it to the 32-frame
-buffer (`moveq #32` loop at `0x40072e50`). It reads TYPE from
-`0x8000f1e4[v]` at `0x40072904..` and dispatches (`==4/5/6/7` special, else EQ
-path at `0x40072b2a`; types `>7` skip the coefficient computation to
-`0x40072d6a`).
+**Hook (1.0h).** digihealth 1.0 rewrites the `lea` at `0x400780a4` (its
+profiling wrapper), so we must not touch it. We instead hook the free
+instruction just before the call, **`0x400780ba`** (`addil #0x80001a18,%d0`,
+`jsr` site; outside the FAST-AUDIO copied block) to `digifilter_dispatch`
+(filter_glue.s). It does the displaced `add`, then per voice points `a3` at
+`digifilter_filt` for `params[0]` in 8..11 and restores the original `a3` (the
+digihealth wrapper, or the stock function) otherwise. `digifilter_filt`
+(filter.c) runs our DSP for our types and tail-calls `0x40072844` for stock
+types, so a profiling wrapper keeps seeing stock voices.
 
-**Hook design:** patch the `lea` at **`0x400780a4`** (`ptr` → `digifilter_filt`,
-outside the FAST-AUDIO copied block). `digifilter_filt(params, buffer, active,
-voice)`:
+**Mode set:** **BP, BP2 (wider BP), COMB, TRASH** (TYPE 8..11). Notch/all-pass/
+peak were dropped (the stock types already cover them); PHASER was dropped
+(unstable/laggy) and replaced by TRASH, a second comb at half the delay.
 
-1. `active == 0` or `TYPE < 8` or `TYPE > 11` → `jmp 0x40072844`;
-2. else `digifilter_svf(buffer, 32, coef, state)` for `TYPE-8` with coefficients
-   from the track's FREQ/RESO; `rts`.
+**Controls [L]:** CUTOFF = `params@2` (word = FREQ index<<8) — tracks FLTR
+encoder E and is **envelope-modulated**. RESO = engine settings slot 0x1b
+(`0x80001502 + 106v + 0x36`, `>>11` → qi 0..15) — FLTR encoder F. TYPE =
+encoder G.
 
-This reads TYPE 8..11 directly from `params[0]`, so **no clamp patch is needed**
-and there is no audio-buffer RE left to do.
+**Smoothing:** SVF coefficients ramp from the previous block across four 8-frame
+sub-blocks; COMB/TRASH use a fractional, per-sample-smoothed delay + feedback,
+saturated, with the delay tapered to 3..255.
 
-**Mode set [owner, 2026-09-29]:** notch/all-pass/peak are dropped (the stock
-types already cover them); the four slots are **BP, BP2 (wider BP), COMB,
-PHASER**. BP/BP2 are the SVF band-pass (BP2 takes `k` from `K27[qi>>1]`); COMB
-is a feedback comb (`COMB_DELAY[fi]` samples, feedback `qi/16`); PHASER is four
-first-order all-pass stages (`a=(1-g)/(1+g)`, depth `qi/16`).
-
-**Validated [L]** (`tests/digiemu_filter_dsp.py`, custom firmware
-`dt1-2.0t-2af35ba1`): forcing the call args and injecting a 1500 Hz tone, BP
-matches `svf_block` 1.6%, BP2 2.2%, COMB matches `comb_gain` 0.0%, PHASER
-matches `phaser_gain` 0.4%; RESO tracks the model across qi 0..12; a stock TYPE
-(1) is **byte-identical** to the stock firmware. FREQ from `0x80001f18+2v>>8`;
-**RESO from the engine settings slot 0x1b** (`0x80001502+106v+0x36`, `>>11` ->
-qi 0..15); buffer `0x80001a18+v*0x80`, 32 frames.
+**Validated [L]:** BP 1.6%, BP2 2.2%, COMB 0.0% (`comb_gain`), TRASH matches a
+div-2 comb; the real UI path engages; cutoff tracks encoder E (0.0% each step);
+a stock TYPE is **byte-identical** to the stock firmware; modulation is smooth
+(max sample-to-sample jump BP 0.073 A, COMB 0.45 A, TRASH 0.39 A on a 1-step/
+block cutoff sweep); extremes (fi 0/127) stable.
 
 ## 7. The stock TYPE clamp (why the UI range alone is not enough) [L]
 
@@ -166,13 +165,15 @@ press can hit `CLEAR SEQUENCE`).
 
 ## 9. Open items
 
-- **RESO mapping**: `qi = (engine RESO slot 0x1b) >> 8` → 0..127 scaled to the
-  16-step `K27`/`qi` 0..15 (currently `>>8` then clamp 0..15, i.e. `qi=reso/8`
-  with the extra bits dropped). Want a sweep that logs the RESO slot against the
-  audible Q to fit `qi` properly (FREQ is settled: `0x80001f18+2v >> 8`).
-- **COMB/PHASER params**: delay/pitch from FREQ and feedback/depth from RESO are
-  first-cut; decide whether a different control (e.g. Base/Width) should drive
-  them.
-- Whether the mk1 FLTR page draws any type graphic (none found so far).
-- Budget/coexistence with `digieq` etc. (site `0x400780a4`; Digi EQ owns
+- **FREQ/RES response curve**: the FLTR page graph still stops at EQ:5. It is
+  drawn by page UI code from UI-model state, not from any of the filter RAM we
+  know (no UI reader of `0x8000f1e4`, `0x8000f584`, the smoothed params or the
+  engine settings). Extending it needs a UI-framework trace. Cosmetic.
+- **COMB/TRASH controls**: delay/pitch from FREQ and feedback from RESO are
+  final enough; TRASH = COMB at half the delay (div 2). Revisit if a different
+  control (Base/Width) is wanted.
+- **Empirical save/reload** of TYPE 8..11: the PATTERN MENU (key 17) →
+  "SAVE PATTERN TO PROJECT?" (`0x401c4418`) + YES, then `emu.portable
+  --rebuild`; static analysis says it round-trips (§8).
+- Budget/coexistence with `digieq` etc. (our site is `0x400780ba`; Digi EQ owns
   `0x400721e6`).

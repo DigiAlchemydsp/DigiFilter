@@ -2,7 +2,7 @@
 
 **Extra per-track filter modes for the Elektron Digitakt mk1 (OS 1.53).**
 
-A format-2 [elekloader](https://github.com/anomalyco/elekloader) mod, id
+A format-2 [elekloader](https://github.com/irpina/elekloader) mod, id
 `digifilter`. It adds four filter types on top of the stock `OFF / LP / HP /
 EQ:1..5`:
 
@@ -21,8 +21,8 @@ stock filter — nothing here reimplements a stock mode.
 
 ## How it works
 
-Three patch sites (see [HANDOFF.md](HANDOFF.md) for the addresses and
-[RE_NOTES.md](RE_NOTES.md) for the reverse-engineering):
+Three patch sites (addresses and the full reverse-engineering are in
+[RE_NOTES.md](RE_NOTES.md)):
 
 1. widen the Filter Type range field from max 7 to max 11;
 2. re-point the TYPE label formatter so 8–11 print `BP / BP2 / COMB / TRASH`;
@@ -71,7 +71,7 @@ links and combines cleanly.
 | file | contents |
 |---|---|
 | `mod.json` | the mod: id, version, sites, sources, `requires core` |
-| `filter.c` | modes, coefficients, comb/phaser→comb DSP, the site entry point |
+| `filter.c` | modes, coefficients, the comb DSP, the site entry point |
 | `filter_dsp.s` | the per-voice state-variable filter (ColdFire EMAC) |
 | `filter_glue.s` | the raw site entry points (labels + the per-voice dispatcher) |
 | `filter_tables.h` | `g`, `k`, frequency and comb-delay tables |
@@ -79,7 +79,6 @@ links and combines cleanly.
 | `tests/digiemu_filter_*.py` | headless digiemu traces/tests (need a digiemu checkout) |
 | `tools/disas.py` | disassembly helper (`m68k-elf-objdump -m m68k:cfv4e`) |
 | `tools/re_locate.py`, `tools/emu_filter.py` | early image/unicorn helpers |
-| `HANDOFF.md` | current state, addresses, build/test workflow |
 | `RE_NOTES.md` | the reverse-engineering findings |
 
 ## Testing
@@ -88,7 +87,7 @@ links and combines cleanly.
 # floating-point model self-test (no toolchain needed)
 python tests/filter_model.py
 
-# live tests in digiemu (see HANDOFF.md for the emulator setup)
+# live tests in digiemu (need a digiemu source checkout + a set-up firmware)
 python tests/digiemu_filter_dsp.py  --digiemu <checkout> --fw <folder> --type 8
 python tests/digiemu_filter_mod.py  --digiemu <checkout> --fw <folder> --type 10
 python tests/digiemu_filter_cutoff.py --digiemu <checkout> --fw <folder>
