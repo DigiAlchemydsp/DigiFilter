@@ -48,35 +48,25 @@ smoothed comb delay) so modulating the filter does not step or click.
 
 ## Building
 
-You need the m68k cross toolchain, an elekloader checkout, the stock
-`Digitakt_OS1.53.syx`, and `core` (2.1). Example (Windows PowerShell):
+Needs the m68k cross toolchain, an elekloader checkout, the stock
+`Digitakt_OS1.53.syx`, and `core` (2.1). Set up the shell, then build:
 
-```powershell
-$env:PATH = "C:\SysGCC\m68k-elf\bin;" + $env:PATH
-$env:ELEKLOADER_CROSS = "m68k-elf-"
-$env:PYTHONPATH = "<elekloader checkout>"
+```sh
+export PATH="<m68k-elf bin>:$PATH"          # e.g. C:\SysGCC\m68k-elf\bin on Windows
+export ELEKLOADER_CROSS=m68k-elf-
+export PYTHONPATH="<elekloader checkout>"
 
-$repo  = "<this folder>"
-$stock = "<Digitakt_OS1.53.syx>"
-$core  = "<elekloader>\mods\core\out\core-2.1.elemod"
-
-# build (writes $repo\out\digifilter-1.0h.elemod)
-python -m elekloader.sdk.build $repo --stock $stock
-
-# lint against core (and, if you use it, digihealth)
-python -m elekloader.lint $repo\out\digifilter-1.0h.elemod --stock $stock --with $core
-
-# combine into a flashable custom firmware (--check first)
-python -m elekloader.patch --stock $stock --mod $core --mod $repo\out\digifilter-1.0h.elemod `
-    --out custom-2.0t.syx --version 2.0t --check
+python -m elekloader.sdk.build . --stock <Digitakt_OS1.53.syx>
+python -m elekloader.lint  out/digifilter-1.0h.elemod --stock <Digitakt_OS1.53.syx> --with <core-2.1.elemod>
+python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core-2.1.elemod> --mod out/digifilter-1.0h.elemod --out custom.syx --version 2.0t --check
 ```
 
-Requirements and the SDK reference are in the elekloader guide
-(`02-mod-json.md`, `04-patching-sites.md`, `05-workflow.md`).
+That must print `BUILT`, then `OK: links as core 2.1 …`, then `OK: the mods
+combine`. Drop `--check` on the last command to write `custom.syx`.
 
-**Coexistence:** the third site is chosen so this mod does **not** overlap
-digihealth 1.0 (which rewrites the same `lea` we used to). `--with digihealth`
-links and combines cleanly.
+`core` is elekloader's `mods/core` (built, or its release). Add
+`--with <digihealth.elemod>` / `--mod <digihealth.elemod>` if you use it — the
+third site is chosen so this mod does **not** overlap digihealth 1.0.
 
 ## Files
 
