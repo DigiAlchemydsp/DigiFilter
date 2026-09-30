@@ -20,16 +20,37 @@ stock filter — nothing here reimplements a stock mode.
 
 > Digitakt **mk1 only**. Digitakt II's filter machines are out of scope.
 
-## Status (WIP)
+## Status
 
-The **audio path is done and validated** (BP / BP2 / COMB / TRASH, with
-smoothing), but the **UI is not finished**: the FLTR page's FREQ/RES **response
-curve** still only draws up to `EQ:5` and does not reflect the new types. The
-graph is drawn by page UI code from UI-model state (not from the filter RAM), so
-extending it is still open work. See [RE_NOTES.md](RE_NOTES.md) "Open items".
+The **audio path is done and validated** (BP / BP2 / COMB / TRASH), including
+the **filter envelope** and the **second FLTR page's comb controls** (delay,
+harmonics, damping, feedback trim), and the DSP is **budgeted at or below the
+stock filter's cost** per voice per block. The one remaining gap is cosmetic:
+the FLTR page's FREQ/RES **response curve** still draws the stock shapes for
+TYPE 8–11. The graph is drawn by page UI code from UI-model state (not from the
+filter RAM), so extending it is still open work. See
+[RE_NOTES.md](RE_NOTES.md) "Open items".
 
 Everything in this repo builds (`BUILT`), lints against `core` and combines with
-`digihealth` (`OK: the mods combine`); the remaining gap is that UI drawing.
+`digihealth` (`OK: the mods combine`).
+
+## Known issues
+
+- **BP (TYPE 8) can clip at some frequencies.** The band-pass SVF has no output
+  saturation (the comb does), so with high RESO near the pass-band the output
+  can exceed full scale. Back off RESO/ENV depth or use BP2. (Tracked for a
+  soft-clip in the SVF.)
+- **Response curve** (above) still shows the stock shapes for TYPE 8–11.
+
+## Controls
+
+- **FREQ (E)** sets the cutoff / comb pitch; **RESO (F)** the resonance /
+  comb feedback; the **filter envelope (H + ADSR)** modulates the cutoff exactly
+  as the stock types do.
+- **Second FLTR page**, while TYPE is COMB or TRASH, reuses the stock knobs:
+  **Base (A)** = delay offset, **Width (B)** = harmonics (delay divider 1–4),
+  **Env Delay (C)** = damping, **SRR (D)** = feedback trim. Their stock
+  defaults (Base 0, Width max, Env Delay 0, SRR 0) leave the comb unchanged.
 
 ## How it works
 
@@ -44,7 +65,14 @@ Three patch sites (addresses and the full reverse-engineering are in
 Our DSP is integer-only (no FPU, no libgcc): a trapezoidal state-variable
 filter for BP/BP2 and two feedback combs for COMB/TRASH. The cutoff and
 resonance are smoothed (a coefficient ramp across the block, and a fractional,
-smoothed comb delay) so modulating the filter does not step or click.
+smoothed comb delay) so modulating the filter does not step or click. The
+filter envelope is added to the cutoff exactly as the stock filter does.
+
+Per voice per render block (measured in digiemu), TYPE 1 (stock) costs ~2400
+instructions; BP/BP2 ~2800; COMB/TRASH ~1750 — so the new modes are no more
+expensive than the stock filter. The SVF computes its coefficients at the
+block's two ends and ramps between them, and the comb's interpolation and
+feedback each use a single 32×32 multiply.
 
 ## Building
 
@@ -57,8 +85,8 @@ export ELEKLOADER_CROSS=m68k-elf-
 export PYTHONPATH="<elekloader checkout>"
 
 python -m elekloader.sdk.build . --stock <Digitakt_OS1.53.syx>
-python -m elekloader.lint  out/digifilter-1.0h.elemod --stock <Digitakt_OS1.53.syx> --with <core-2.1.elemod>
-python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core-2.1.elemod> --mod out/digifilter-1.0h.elemod --out custom.syx --version 2.0t --check
+python -m elekloader.lint  out/digifilter-1.0i.elemod --stock <Digitakt_OS1.53.syx> --with <core-2.1.elemod>
+python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core-2.1.elemod> --mod out/digifilter-1.0i.elemod --out custom.syx --version 2.0t --check
 ```
 
 That must print `BUILT`, then `OK: links as core 2.1 …`, then `OK: the mods

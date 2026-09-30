@@ -1,25 +1,23 @@
 /* Digi Filter: extra per-track filter modes for the Digitakt mk1 (OS 1.53).
  *
- * SCAFFOLD. The DSP, the coefficient maths and the settings plumbing are real;
- * the two per-track integration points are still to be reverse-engineered
- * (RE_NOTES.md):
- *   - where the stock per-voice filter dispatches on TYPE (the jsr site), and
- *   - how the FLTR page's TYPE list is bounded (widening it to the new values).
- * Until those are filled in, mod.json wires no site, so the mod builds and
- * lints but does nothing on the device.
+ * The stock filter keeps running for every stock TYPE value: nothing here
+ * reimplements a stock mode, so stock sounds are untouched. TYPE values above
+ * the stock range (FM_FIRST_TYPE + mode) select an extra mode. BP/BP2 run a
+ * trapezoidal state-variable filter (Simper / Zavalishin, the same kernel as
+ * Digi EQ's eq_dsp.s) with the track's own FREQ, RESO and filter envelope;
+ * COMB/TRASH run a feedback comb, with the second FLTR page's Base / Width /
+ * Env Delay / SRR knobs reused as delay, harmonics, damping and feedback trim.
  *
- * Design (docs/..., plans/filter-modes.md):
- *   - The stock filter keeps running for every stock TYPE value. Nothing here
- *     reimplements a stock mode, so stock sounds are untouched.
- *   - TYPE values above the stock range (FM_FIRST_TYPE + mode) select an extra
- *     mode: band pass, notch, all pass or peak. Each voice runs a trapezoidal
- *     state-variable filter (Simper / Zavalishin, the same kernel as Digi EQ's
- *     eq_dsp.s) with the track's own FREQ and RESO.
- *   - The output mix m = (m0, m1, m2) over (v0, band, low) gives the mode:
- *       BP (0, k, 0)   NOTCH (1, -k, 0)   AP (1, -2k, 0)   PEAK (1, -k, -2)
- *     stored as c = (m0 - 1, m1, m2) * ONE27 (the kernel does out = v0 + 16*(...)).
+ * The filter envelope (FLTR slot 0x1c, params@6) is applied exactly as the
+ * stock filter does (see cutoff_index): the engine writes a per-voice envelope
+ * level at 0x4199df58 + v*12, and the modulated cutoff is
+ *   (FREQ<<16) + (((-env) * ((ENVword-0x4000)<<17)) >> 31).
  *
  * 32-bit integer arithmetic only: no FPU, no libgcc (mulsh / div55 by hand).
+ *
+ * Open: the FLTR page's FREQ/RES response *curve* still draws the stock shapes
+ * for TYPE 8..11 (cosmetic; it is drawn by the page UI from UI-model state, not
+ * from this DSP's RAM). See RE_NOTES.md / HANDOFF.md.
  */
 typedef int int32;
 typedef unsigned int uint32;
@@ -45,6 +43,8 @@ typedef unsigned int uint32;
 #define FS_RESO 0x1b
 #define FS_BASE 0x21
 #define FS_WIDTH 0x22
+#define FS_ENVDELAY 0x23
+#define FS_SRR 0x24
 
 /* ---- the extra modes (TYPE = FM_FIRST_TYPE + mode) ----
  * Notch/all-pass/peak are already covered by the stock filter types, so the
@@ -73,7 +73,7 @@ static int prev_mode[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 extern void digifilter_svf(int32 *buf, int frames, const int32 *coef, int32 *state);
 
 /* floor(a * b / 2^sh) for 16 <= sh <= 31, when the result fits 32 bits */
-static int32 mulsh(int32 a, int32 b, int sh)
+static inline __attribute__((always_inline)) int32 mulsh(int32 a, int32 b, int sh)
 {
     uint32 ua = a < 0 ? -(uint32)a : (uint32)a, ub = b < 0 ? -(uint32)b : (uint32)b;
     uint32 al = ua & 0xffff, ah = ua >> 16, bl = ub & 0xffff, bh = ub >> 16;
@@ -185,10 +185,42 @@ static void commit(void)
 /* CUTOFF comes from params@2, the field the stock per-voice filter 0x40072844
  * reads (word = FREQ index<<8). It tracks FLTR encoder E (FREQ) exactly like
  * the stock types (verified live). RESO comes from the engine's per-voice
- * settings slot 0x1b (FLTR encoder F), value<<8 -> qi 0..15. */
+ * settings slot 0x1b (FLTR encoder F), value<<8 -> qi 0..15.
+ *
+ * The filter ENVELOPE (FLTR encoder H, slot 0x1c) is at params@6. The stock
+ * filter adds an envelope modulation to FREQ before filtering; we do the same
+ * (RE_NOTES, "filter envelope"):
+ *
+ *   envmod = ((-env_level) * ((ENV_word - 0x4000) << 17)) >> 31   (32-bit, floor)
+ *   cutoff = (FREQ_word << 16) + envmod        (clamped 0..0x7f000000)
+ *
+ * where env_level = *(int *)(0x4199df58 + v*12) is the per-voice filter
+ * envelope output the engine's envelope stage (0x40073304) writes every block,
+ * read by the stock filter through 0x40073412. ENV_word is biased: 0x4000 = 0.
+ * Since FREQ_word is (index<<8), cutoff>>16 = FREQ_word + envmod>>16, so the
+ * modulated index is (FREQ_word + (envmod>>16)) >> 8. */
 #define ENGINE(v) (0x80001502 + 106 * (v))
 #define PARAM_CUTOFF(params) (*(volatile unsigned short *)((params) + 2))
+#define PARAM_ENV(params) (*(volatile unsigned short *)((params) + 6))
 #define SET_RESO(v) (*(volatile unsigned short *)(ENGINE(v) + 2 * FS_RESO))
+#define ENV_LEVEL(v) (*(volatile int *)(0x4199DF58 + 12 * (v)))
+
+/* Every sound slot is a word in the render record; slot s is at
+ * params + 2s - 0x32 (TYPE s=0x19 is at +0; FREQ 0x1a at +2; ...; the second
+ * FLTR page's Base/Width/Env Delay/SRR slots 0x21..0x24 are at +0x10..+0x16).
+ * Verified live: turning the second-page knobs moves these words. */
+#define PARAM_SLOT(params, s) (*(volatile unsigned short *)((params) + 2 * (s) - 0x32))
+
+/* ---- COMB second FLTR page (slots 0x21..0x24) ----
+ * COMB/TRASH reuse the second page, which the stock filter uses as Base / Width
+ * / Env Delay / SRR while it runs — but it does not run for our types, so those
+ * knobs are free. Defaults (Base 0, Width max, Env Delay 0, SRR 0) leave the
+ * comb exactly as it was:
+ *   Base 0x21   delay offset (coarse), 0..127 samples added to the FREQ delay
+ *   Width 0x22  harmonics: divider multiplier 1..4 (max width = 1 = no change)
+ *   EnvDelay 0x23  damping: 0 = off, else a one-pole on the feedback
+ *   SRR 0x24    feedback trim: pushes the RESO feedback toward self-oscillation
+ */
 
 /* ---- COMB state (per voice) ---- */
 #define COMB_N 256                   /* power of two: delay wraps with a mask */
@@ -198,6 +230,7 @@ static int comb_pos[8];
 static int comb_init[8];
 static int32 comb_dly[8];            /* Q16 smoothed delay in samples */
 static int32 comb_g[8];              /* Q27 smoothed feedback */
+static int32 comb_lp[8];             /* Q27 one-pole state for the damping */
 static int prev_filt_type[8];        /* reset state when the mode changes */
 
 /* Per-sample smoothing shifts. The delay is smoothed so changing the cutoff
@@ -211,9 +244,12 @@ static int prev_filt_type[8];        /* reset state when the mode changes */
  * higher (different) harmonic series. The delay is interpolated (linear) so it
  * can move continuously; the output is saturated so high feedback cannot run
  * away at the extreme cutoffs. */
-static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div)
+static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div,
+                     int dly_off, int hdiv, int damp, int fbtrim)
 {
-    int32 target = COMB_DELAY[fi] / div;
+    /* Harmonics: an extra divider on top of the mode's own (COMB 1 / TRASH 2).
+     * Width 0x22 at max (the default) -> 1 (no change). */
+    int32 target = COMB_DELAY[fi] / (div * hdiv) + dly_off;
     int32 tdq, gt, *b = comb_buf[v];
     int p, i;
     if (target < 3)
@@ -222,17 +258,23 @@ static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div)
         target = COMB_MASK;
     tdq = target << 16;
     gt = (int32)qi * (ONE27 / 16);   /* 0 .. 0.9375 */
+    if (fbtrim) {
+        gt += mulsh(ONE27 - gt, fbtrim, 15);     /* up toward full feedback */
+        if (gt > 0x7c000000)
+            gt = 0x7c000000;         /* stay short of runaway */
+    }
     if (!comb_init[v]) {
         comb_init[v] = 1;
         comb_dly[v] = tdq;           /* start at the target, no glide-in */
         comb_g[v] = gt;
+        comb_lp[v] = 0;
         comb_pos[v] = 0;
         for (i = 0; i < COMB_N; i++)
             b[i] = 0;
     }
     p = comb_pos[v];
     for (i = 0; i < frames; i++) {
-        int32 ds, ip, fp, i0, i1, x, val, y;
+        int32 ds, ip, fp, i0, i1, x, val, y, fa, da, ga, va;
         comb_dly[v] += (tdq - comb_dly[v]) >> COMB_DSHIFT;
         comb_g[v] += (gt - comb_g[v]) >> COMB_GSHIFT;
         ds = comb_dly[v];
@@ -241,8 +283,19 @@ static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div)
         i0 = (p - ip) & COMB_MASK;
         i1 = (i0 - 1) & COMB_MASK;
         x = buf[i];
-        val = b[i0] + mulsh(fp, b[i1] - b[i0], 16);
-        y = x + mulsh(comb_g[v], val, 27);
+        /* Linear interpolation, but with one 32x32 multiply instead of mulsh:
+         * (fp*diff)>>16 == ((fp>>1)*((diff)>>13))>>2, both factors < 2^15. */
+        fa = fp >> 1;
+        da = (b[i1] - b[i0]) >> 13;
+        val = b[i0] + ((fa * da) >> 2);
+        if (damp) {                  /* Env Delay 0x23: darken the tail */
+            comb_lp[v] += (val - comb_lp[v]) >> 4;
+            val += mulsh(comb_lp[v] - val, damp, 15);
+        }
+        /* Feedback: (comb_g*val)>>27 == ((comb_g>>12)*(val>>11))>>4. */
+        ga = comb_g[v] >> 12;
+        va = val >> 11;
+        y = x + ((ga * va) >> 4);
         if (y > (1 << 27))
             y = 1 << 27;
         else if (y < -(1 << 27))
@@ -266,16 +319,44 @@ static int svf_have[8];
 int digifilter_disp_got;
 int digifilter_disp_orig;
 
+/* The envelope-modulated cutoff index: FREQ (params@2) plus the stock filter's
+ * envelope term (params@6 * the engine's per-voice envelope level), 0..127. */
+static int cutoff_index(unsigned char *params, int v)
+{
+    int base = (int)(unsigned)PARAM_CUTOFF(params);       /* index<<8 */
+    int depth = ((int)(unsigned)PARAM_ENV(params) - 0x4000) << 17;
+    if (depth) {
+        int32 env = ENV_LEVEL(v);
+        int32 envmod = mulsh((int32)(0u - (uint32)env), depth, 31);  /* (-env)*depth>>31 */
+        base += envmod >> 16;                             /* to FREQ-word units */
+    }
+    return clampi(base >> 8, 0, 127);
+}
+
 static void svf_run(int m, int fi, int qi, int32 *buf, int v)
 {
     int fi0 = svf_have[v] ? svf_fi[v] : fi;
     int qi0 = svf_have[v] ? svf_qi[v] : qi;
+    struct fcoef c0, c1;
     int k;
+    /* Compute the coefficients only at this block's start and end and ramp
+     * between them (2 mode_coef calls, each with its div55) instead of
+     * recomputing them at 4 ramped index points (4 calls). The coefficients
+     * move smoothly with the indices, so a linear ramp is as smooth. */
+    mode_coef(m, fi0, qi0, &c0);
+    mode_coef(m, fi, qi, &c1);
     for (k = 0; k < 4; k++) {
-        int fi_k = fi0 + (((fi - fi0) * (k + 1)) >> 2);
-        int qi_k = qi0 + (((qi - qi0) * (k + 1)) >> 2);
+        int w = k + 1;                               /* 1..4, ends exactly at c1 */
+        int32 *d = (int32 *)&c0, *e = (int32 *)&c1;
         struct fcoef c;
-        mode_coef(m, fi_k, qi_k, &c);
+        int32 *o = (int32 *)&c;
+        int j;
+        for (j = 0; j < 6; j++) {
+            /* Lerp d..e by w/4 without overflowing on a large jump: split the
+             * delta so no intermediate exceeds 32 bits. */
+            int32 delta = e[j] - d[j];
+            o[j] = d[j] + (delta >> 2) * w + (((delta & 3) * w) >> 2);
+        }
         digifilter_svf(buf + 8 * k, 8, (const int32 *)&c, dsp_st[v]);
     }
     svf_fi[v] = fi;
@@ -293,9 +374,11 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
         int type = params[0];
         int m = type - FM_FIRST_TYPE;
         if (m >= 0 && m < FM_NMODES) {
-            /* CUTOFF: params@2 (index<<8), RESO: params@6 (value<<8) — the same
-             * fields the stock per-voice filter reads, so the FLTR knobs track. */
-            int fi = clampi((unsigned)PARAM_CUTOFF(params) >> 8, 0, 127);
+            /* CUTOFF: params@2 (index<<8) plus the params@6 filter-envelope
+             * modulation (cutoff_index), RESO: the engine's slot 0x1b — the
+             * same fields the stock per-voice filter reads, so the FLTR knobs
+             * and the filter envelope track. */
+            int fi = cutoff_index(params, voice);
             int qi = clampi((unsigned)SET_RESO(voice) >> 11, 0, 15);
             if (prev_filt_type[voice] != type) {         /* mode change: fresh state */
                 comb_init[voice] = 0;
@@ -306,10 +389,16 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
             }
             if (m <= FM_BP2) {
                 svf_run(m, fi, qi, buf, voice);
-            } else if (m == FM_COMB) {
-                comb_run(buf, 32, fi, qi, voice, 1);
             } else {
-                comb_run(buf, 32, fi, qi, voice, 2);     /* TRASH: div 2 */
+                /* Second FLTR page (slots 0x21..0x24): delay offset, harmonics,
+                 * damping, feedback trim. Defaults leave the comb unchanged. */
+                int width = (int)(unsigned)PARAM_SLOT(params, FS_WIDTH);
+                int dly_off = (int)(unsigned)PARAM_SLOT(params, FS_BASE) >> 8;
+                int hdiv = 1 + ((32512 - width) * 3) / 32512;    /* 1..4 */
+                int damp = (int)(unsigned)PARAM_SLOT(params, FS_ENVDELAY);
+                int fbtrim = (int)(unsigned)PARAM_SLOT(params, FS_SRR);
+                int div = (m == FM_COMB) ? 1 : 2;                /* TRASH = div 2 */
+                comb_run(buf, 32, fi, qi, voice, div, dly_off, hdiv, damp, fbtrim);
             }
             return 1;
         }

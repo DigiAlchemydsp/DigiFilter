@@ -106,20 +106,28 @@ types, so a profiling wrapper keeps seeing stock voices.
 peak were dropped (the stock types already cover them); PHASER was dropped
 (unstable/laggy) and replaced by TRASH, a second comb at half the delay.
 
-**Controls [L]:** CUTOFF = `params@2` (word = FREQ index<<8) — tracks FLTR
-encoder E and is **envelope-modulated**. RESO = engine settings slot 0x1b
-(`0x80001502 + 106v + 0x36`, `>>11` → qi 0..15) — FLTR encoder F. TYPE =
-encoder G.
+**Controls [L]:** the params record (`params = 0x800027a4 + v*0x6a`) holds, per
+word, `+0` TYPE, `+2` FREQ (index<<8), `+4` RESO, `+6` ENV DEPTH (bias 0x4000);
+slot `s` at `params + 2s - 0x32`. FLTR encoders, wire code = channel+1:
+A(1) ATK 0x1d, B(2) DEC 0x1e, C(3) SUS 0x1f, D(4) REL 0x20, E(5) FREQ 0x1a,
+F(6) RESO 0x1b, G(7) TYPE 0x19, H(8) ENV DEPTH 0x1c. RESO also mirrors engine
+settings slot 0x1b (`0x80001502 + 106v + 0x36`).
 
-**Smoothing:** SVF coefficients ramp from the previous block across four 8-frame
-sub-blocks; COMB/TRASH use a fractional, per-sample-smoothed delay + feedback,
-saturated, with the delay tapered to 3..255.
+**Filter envelope [L]:** FREQ at `params@2` is the *base*; the envelope is added
+by the stock filter (and now by ours), see §10.
+
+**Smoothing:** SVF coefficients are computed at the block's two ends and ramped
+across four 8-frame sub-blocks; COMB/TRASH use a fractional, per-sample-smoothed
+delay + feedback, saturated, with the delay tapered to 3..255.
 
 **Validated [L]:** BP 1.6%, BP2 2.2%, COMB 0.0% (`comb_gain`), TRASH matches a
 div-2 comb; the real UI path engages; cutoff tracks encoder E (0.0% each step);
 a stock TYPE is **byte-identical** to the stock firmware; modulation is smooth
-(max sample-to-sample jump BP 0.073 A, COMB 0.45 A, TRASH 0.39 A on a 1-step/
+(max sample-to-sample jump BP 0.076 A, COMB 0.45 A, TRASH 0.39 A on a 1-step/
 block cutoff sweep); extremes (fi 0/127) stable.
+
+**Cost [L]:** instructions per voice per render block — stock TYPE 1 ~2400,
+BP/BP2 ~2800, COMB/TRASH ~1750.
 
 ## 7. The stock TYPE clamp (why the UI range alone is not enough) [L]
 
@@ -165,15 +173,85 @@ press can hit `CLEAR SEQUENCE`).
 
 ## 9. Open items
 
-- **FREQ/RES response curve**: the FLTR page graph still stops at EQ:5. It is
-  drawn by page UI code from UI-model state, not from any of the filter RAM we
-  know (no UI reader of `0x8000f1e4`, `0x8000f584`, the smoothed params or the
-  engine settings). Extending it needs a UI-framework trace. Cosmetic.
-- **COMB/TRASH controls**: delay/pitch from FREQ and feedback from RESO are
-  final enough; TRASH = COMB at half the delay (div 2). Revisit if a different
-  control (Base/Width) is wanted.
+- **FREQ/RES response curve**: the FLTR page graph still draws the stock shapes
+  for TYPE 8..11. It is drawn by page UI code from UI-model state, not from the
+  filter RAM: `tests/digiemu_filter_curve_find.py` shows every read of the
+  coefficient/state/clamped-type RAM (`0x8000f1dc`/`0x8000f584`/`0x8000f3a4`)
+  comes from the **DSP** region (`0x40072xxx`), not from UI code. See §10 for
+  the UI map gathered so far. Cosmetic.
+- **BP (TYPE 8) clips at some frequencies**: the SVF (`filter_dsp.s`) does not
+  saturate its output (the comb does), so high RESO near the pass-band can run
+  past full scale. A soft-clip in the kernel would fix it; for now document it
+  (README "Known issues").
 - **Empirical save/reload** of TYPE 8..11: the PATTERN MENU (key 17) →
   "SAVE PATTERN TO PROJECT?" (`0x401c4418`) + YES, then `emu.portable
   --rebuild`; static analysis says it round-trips (§8).
 - Budget/coexistence with `digieq` etc. (our site is `0x400780ba`; Digi EQ owns
   `0x400721e6`).
+
+## 10. Session 2: the filter envelope, the second page, cost, and the UI
+
+Marked **[L]** where verified live in digiemu.
+
+### 10.1 The filter envelope [L]
+
+`0x40072844` builds the *modulated* cutoff as
+
+```
+cutoff(24.8) = (FREQ_word << 16) + envmod          ; clamped 0..0x7f000000
+envmod       = ((-env_level) * ((ENV_word-0x4000) << 17)) >> 31   ; arithmetic
+env_level    = *(int32*)(0x4199df58 + voice*12)
+```
+
+- `ENV_word` is `params@6`, biased 0x4000 (FLTR encoder H / slot 0x1c).
+- `env_level` is the per-voice filter-envelope output. The envelope stage
+  `0x40073304` (called each block from the render at `0x40078096`) walks 8
+  voices: state at `0x4199df54 + v*12`, output at `0x4199df58 + v*12`. The stock
+  filter reads it through the accessor `0x40073412(v)` (returns `*(v*12 +
+  0x4199df58)`), and stores the raw `envmod` at `0x4399dad4 + v*4`.
+- Fitted exactly (0 error) over live note data; `-env` is taken unsigned so
+  `env = 0x80000000` (envelope start) gives `envmod = depth`.
+- **Implemented** in `cutoff_index()` (filter.c). `fi = clamp((FREQ_word +
+  (envmod>>16)) >> 8, 0, 127)`. Validated by `tests/digiemu_filter_env_mod.py`
+  (BP, BP2, COMB; depth up/down and depth 0 control).
+
+### 10.2 The second FLTR page: comb controls [L]
+
+The render params record carries every slot; slot `s` is at `params + 2s -
+0x32`. Turning the second page's knobs moves these words (Base 0x21 at `+0x10`,
+Env Delay 0x23 at `+0x14`, ...). The stock filter uses them as Base / Width /
+Env Delay / SRR, but for COMB/TRASH it does not run, so we reuse them:
+Base = delay offset (`>>8` samples), Width = harmonics divider 1..4 (Width max
+= 1), Env Delay = damping (one-pole on the feedback), SRR = feedback trim. The
+stock defaults leave the comb unchanged. Validated by
+`tests/digiemu_filter_comb2.py` (delay/harmonics vs `comb_gain`).
+
+### 10.3 Cost [L]
+
+Measured with a per-voice instruction counter around the dispatch
+(`0x400780ba` → `0x400780c6`), per voice per block:
+
+| TYPE | before | after |
+|---|---|---|
+| 1 (stock) | 2397 | 2397 |
+| 8/9 BP/BP2 | 4200/— | 2811/2825 |
+| 10/11 COMB/TRASH | 5604 | 1744 |
+
+The wins: `mulsh` is `always_inline`; the comb's per-sample interpolation and
+feedback each became a single 32×32 multiply (`(fp*diff)>>16 ==
+((fp>>1)*((diff)>>13))>>2`; `(g*val)>>27 == ((g>>12)*(val>>11))>>4`); and
+`svf_run` computes the coefficients at the block ends and ramps between them
+(2 `mode_coef`/div55 instead of 4).
+
+### 10.4 The response-curve UI (still open)
+
+From `digi1_mods` "TECHNICAL_NOTES": the track parameter pages are a page view
+whose current page is a *kind*; the kind → layout table is `0x400657b2`
+(20 × 44 bytes at RAM `0x4197cf88`; `+8..` are the knobs' descriptor indices).
+The view's draw dispatches on the kind (e.g. the TRIG view's draw `0x400368ba`
+asks kind == 15 for the piano-roll, else `0x40031802`). The FLTR page has its
+own kind and a draw that paints the response curve; the curve code clamps the
+type to the stock `EQ:5`. Finding that draw (and either feeding it coefficients
+for our modes or painting our own curve) is the remaining work. The curve
+finder test's result (all RAM readers are DSP code) rules out simply writing the
+coefficient tables.
