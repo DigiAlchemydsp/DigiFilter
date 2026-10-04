@@ -173,12 +173,8 @@ press can hit `CLEAR SEQUENCE`).
 
 ## 9. Open items
 
-- **FREQ/RES response curve**: the FLTR page graph still draws the stock shapes
-  for TYPE 8..11. It is drawn by page UI code from UI-model state, not from the
-  filter RAM: `tests/digiemu_filter_curve_find.py` shows every read of the
-  coefficient/state/clamped-type RAM (`0x8000f1dc`/`0x8000f584`/`0x8000f3a4`)
-  comes from the **DSP** region (`0x40072xxx`), not from UI code. See §10 for
-  the UI map gathered so far. Cosmetic.
+- **FREQ/RES response curve**: SOLVED (§10.4) — the FLTR page drawView is hooked
+  and paints the BP/BP2/COMB/TRASH curves. Cosmetic only; audio is unaffected.
 - **BP (TYPE 8) clips at some frequencies**: the SVF (`filter_dsp.s`) does not
   saturate its output (the comb does), so high RESO near the pass-band can run
   past full scale. A soft-clip in the kernel would fix it; for now document it
@@ -243,15 +239,99 @@ feedback each became a single 32×32 multiply (`(fp*diff)>>16 ==
 `svf_run` computes the coefficients at the block ends and ramps between them
 (2 `mode_coef`/div55 instead of 4).
 
-### 10.4 The response-curve UI (still open)
+### 10.4 The response-curve UI (SOLVED) [S][L]
 
-From `digi1_mods` "TECHNICAL_NOTES": the track parameter pages are a page view
-whose current page is a *kind*; the kind → layout table is `0x400657b2`
-(20 × 44 bytes at RAM `0x4197cf88`; `+8..` are the knobs' descriptor indices).
-The view's draw dispatches on the kind (e.g. the TRIG view's draw `0x400368ba`
-asks kind == 15 for the piano-roll, else `0x40031802`). The FLTR page has its
-own kind and a draw that paints the response curve; the curve code clamps the
-type to the stock `EQ:5`. Finding that draw (and either feeding it coefficients
-for our modes or painting our own curve) is the remaining work. The curve
-finder test's result (all RAM readers are DSP code) rules out simply writing the
-coefficient tables.
+The FLTR page is a track-parameter page (SRC/FLTR/AMP/LFO share one view class).
+The page-kind list is the view's `+124` vector with the index at `+144`; the
+kind -> layout table is `0x400657b2` (20 x 44 bytes at RAM `0x4197cf88`, whose
+`+8..` are the 8 knob descriptor ids). The FLTR page's layout is
+`{ATK,DEC,SUS,REL,FREQ,RESO,TYPE,ENV}` = ids `{34,35,36,37,30,32,33,38}`
+(descriptor ids, from the ROM table at `0x401a9d9c`), i.e. **kind 6** —
+confirmed by reading the layout table out of a `gui.snap`.
+
+The track-parameter view class vtable is **`0x40184290`**; its drawView (slot 4,
+`+0x10`) is the data word at **`0x401842a0`** = **`0x400379ca`**. That drawView
+dispatches on the page kind: kind 6 (FLTR) -> `0x4003774a`, kind 7 (AMP) ->
+`0x40037564`, else the generic page body `0x40031802`. Inside the FLTR body the
+FREQ/RES curve is drawn by `0x4003197e` (single call site `0x400378ae`).
+
+**Implementation (mod `digifilter`):** the curve is now painted from core's
+`ev_draw` event (see §11): `digifilter` subscribes `digifilter_draw` (order 40),
+which walks the view controller's view list (the one drawAll iterates, sentinel
+at ctrl+0x14, first node at ctrl+0x1c, view at node+8), takes the view whose kind
+is 6, and reads the active track's TYPE/FREQ/RESO from the pattern's kit (the
+TYPE slot word is `type<<8`). It then clears the stock graph interior (x 20..71)
+and paints (see below), and clears the small TYPE box (x 78..92, same rows) and
+draws a fixed mini version of the mode there. The stock page is left untouched
+for stock types.
+
+Curve rendering:
+
+- **BP/BP2** — the SVF band-pass magnitude at FREQ/RESO in half-dB (the DSP's
+  own `g`/`k` tables), smoothed by three **in-place `[1,2,1]/4` passes** (the
+  integer ratio/log2 quantisation stepped the curve). BP2 uses a lower `k` (wider
+  band). The 0 dB baseline is gone.
+- **COMB** — the feedback comb magnitude `|1 / (1 - g·e^{-jwD})|`, evaluated with
+  a 256-entry Q15 cosine table of the phase `wD = 2πfD/fs` and `log2`, so the
+  teeth sharpen with RESO (g). Because the graph x-axis is logarithmic a literal
+  harmonic comb crams every tooth into the top octave, so the teeth are laid out
+  **evenly across the display**, their count from FREQ (harmonics in 20 Hz–20 kHz,
+  capped at 8 so they stay readable).
+- **TRASH** — the earlier envelope curve (full at the harmonics, dipping between
+  them), series `div 2`.
+
+Each curve is normalised into the graph box (its max to the top row, min to the
+bottom) so every mode's shape reads in the small 50-px-wide, ~11-px-tall box.
+
+Earlier the curve finder (`digiemu_filter_curve_find.py`) ruled out writing the
+DSP's coefficient RAM; the resolution is the event handler here, not the RAM.
+Validated live by `tests/digiemu_filter_curve.py` (the graph pixels change for the
+new modes, and BP and COMB draw different shapes).
+
+**Caveat — the drawView vtable slot is shared with the `ev_draw` event (see
+§11).** Patching the `0x401842a0` slot with `op:ptr` worked in single-mod builds
+but was lost in multi-mod builds: it is the drawView slot of the shared
+track-parameter page view class and core's `ev_draw` dispatcher owns it whenever
+any mod subscribes to that event. Subscribing to `ev_draw` (done in 1.0i) instead
+of patching the slot composes with the event chain.
+
+---
+
+## 11. Multi-mod build: the FLTR curve slot is overwritten by the `ev_draw` event [S]
+
+**Finding (04/10).** The user flashed `ULTITAKT-2.XX.syx` (a 9-mod combined
+build) and the FLTR curve was still stock, even though the syx *does* contain our
+`digifilter` 1.0i (sha256 `17b7bc76…`, same as `out/digifilter-1.0i.elemod`).
+
+The main OS image in that `.syx` (section id 3, decoded length 2526532, base
+`0x40000400`) has:
+
+| address | meaning | bytes found | expected (ours) |
+|---|---|---|---|
+| `0x401aa45c` | TYPE range | `00000b00` | `00000b00` ✓ |
+| `0x401539b2` | TYPE name fmt ptr | `47be2cc0` | `47be2cc0` ✓ (digifilter_typefmt) |
+| `0x400780ba` | per-voice filter call | `4eb947be2d18` | ✓ (digifilter_dispatch) |
+| `0x401842a0` | **FLTR drawView ptr** | **`47be3892`** | `47be168a` ✗ |
+
+- `digifilter_fltrdraw` in that linked build = `0x47be168a` (from the build's
+  `.map.json`), but the slot holds `0x47be3892`.
+- `0x47be3892` falls **inside `digimatrix_draw`** (`0x47be3620` … `0x47be39ac`),
+  i.e. the slot was overwritten with a `digimatrix` function, not ours.
+
+Why: `0x401842a0` is the drawView slot of the shared track-parameter page view
+class. Core's **event system** installs its `ev_draw` dispatcher trampoline into
+this slot whenever a mod subscribes to `ev_draw`. In `ULTITAKT`, `digimatrix`
+(and one more mod) subscribe to `ev_draw` — the sidecar `.json` shows
+`link.tables.ev_draw`: `at 0x47bea3bc`, **`entries: 2`** — so core's trampoline
+owns the slot, and our raw `op:ptr` patch of the same address is lost. Single-mod
+and 2-mod test builds don't trigger it, which is why `tests/digiemu_filter_curve.py`
+passes but the device shows the stock curve.
+
+**Fix (implemented, 1.0i):** stop patching `0x401842a0` with `op:ptr`. Instead
+`digifilter` subscribes to `ev_draw` (`digifilter_draw`, order 40, like
+`digimatrix_draw`) and paints the curve from that handler: it walks the view
+controller's view list to the view whose page kind is 6, and draws when the
+active TYPE is 8..11. The `0x401842a0` site is gone (3 sites now). This composes
+with the event chain instead of fighting it; `elekloader.lint` reports the
+combined `core + digifilter + digimatrix` set still links with no overlap, and
+the title-page curve test passes on that combined build.

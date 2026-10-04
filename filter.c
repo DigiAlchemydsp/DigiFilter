@@ -15,9 +15,8 @@
  *
  * 32-bit integer arithmetic only: no FPU, no libgcc (mulsh / div55 by hand).
  *
- * Open: the FLTR page's FREQ/RES response *curve* still draws the stock shapes
- * for TYPE 8..11 (cosmetic; it is drawn by the page UI from UI-model state, not
- * from this DSP's RAM). See RE_NOTES.md / HANDOFF.md.
+ * The FLTR page's FREQ/RES response *curve* is drawn by filter_ui.c, from a
+ * core ev_draw handler (digifilter_draw) for TYPE 8..11. See RE_NOTES.md.
  */
 typedef int int32;
 typedef unsigned int uint32;

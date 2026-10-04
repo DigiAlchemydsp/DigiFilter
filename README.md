@@ -1,6 +1,6 @@
 # DigiFilter
 
-**Work in progress (WIP).** Extra per-track filter modes for the Elektron
+Extra per-track filter modes for the Elektron
 Digitakt mk1 (OS 1.53).
 
 A format-2 [elekloader](https://github.com/irpina/elekloader) mod, id
@@ -18,18 +18,25 @@ Each mode runs per track and uses that track's own FREQ, RESO and filter
 envelope, exactly like the stock types. Stock TYPE values keep running the
 stock filter — nothing here reimplements a stock mode.
 
+The **FLTR page** redraws its FREQ/RES response curve for the new types (a
+band-pass bell for BP/BP2, comb teeth for COMB, a trash can for TRASH) and shows
+a small fixed version of each shape in the TYPE box to the right of the graph:
+
+| COMB | TRASH |
+|---|---|
+| ![COMB](docs/img/fltr-comb.png) | ![TRASH](docs/img/fltr-trash.png) |
+
 > Digitakt **mk1 only**. Digitakt II's filter machines are out of scope.
 
 ## Status
 
 The **audio path is done and validated** (BP / BP2 / COMB / TRASH), including
-the **filter envelope** and the **second FLTR page's comb controls** (delay,
-harmonics, damping, feedback trim), and the DSP is **budgeted at or below the
-stock filter's cost** per voice per block. The one remaining gap is cosmetic:
-the FLTR page's FREQ/RES **response curve** still draws the stock shapes for
-TYPE 8–11. The graph is drawn by page UI code from UI-model state (not from the
-filter RAM), so extending it is still open work. See
-[RE_NOTES.md](RE_NOTES.md) "Open items".
+the **filter envelope**, the **second FLTR page's comb controls** (delay,
+harmonics, damping, feedback trim), and the **FLTR page's FREQ/RES response
+curve and TYPE-box glyphs**, which now redraw for the new modes (a band-pass
+bell for BP/BP2, comb teeth for COMB, a trash can for TRASH). The DSP is
+**budgeted at or below the stock filter's cost** per voice per block. See
+[RE_NOTES.md](RE_NOTES.md).
 
 Everything in this repo builds (`BUILT`), lints against `core` and combines with
 `digihealth` (`OK: the mods combine`).
@@ -40,7 +47,6 @@ Everything in this repo builds (`BUILT`), lints against `core` and combines with
   saturation (the comb does), so with high RESO near the pass-band the output
   can exceed full scale. Back off RESO/ENV depth or use BP2. (Tracked for a
   soft-clip in the SVF.)
-- **Response curve** (above) still shows the stock shapes for TYPE 8–11.
 
 ## Controls
 
@@ -54,13 +60,19 @@ Everything in this repo builds (`BUILT`), lints against `core` and combines with
 
 ## How it works
 
-Three patch sites (addresses and the full reverse-engineering are in
-[RE_NOTES.md](RE_NOTES.md)):
+Three patch sites plus an `ev_draw` subscription (addresses and the full
+reverse-engineering are in [RE_NOTES.md](RE_NOTES.md)):
 
 1. widen the Filter Type range field from max 7 to max 11;
 2. re-point the TYPE label formatter so 8–11 print `BP / BP2 / COMB / TRASH`;
 3. hook the per-voice filter call in the render and run our own DSP for TYPE
-   8–11, tail-calling the stock filter for everything else.
+   8–11, tail-calling the stock filter for everything else;
+4. subscribe to core's `ev_draw` (`digifilter_draw`, order 40): after the page
+   has drawn, when the shown page kind is FLTR (6) and the active track's TYPE
+   is 8–11, mask the stock graph and TYPE box and paint the BP/BP2/COMB/TRASH
+   response curve plus the mode's small TYPE-box glyph.
+   (This composes with the event chain; patching the page drawView vtable entry
+   `0x401842a0` directly lost the curve in multi-mod builds.)
 
 Our DSP is integer-only (no FPU, no libgcc): a trapezoidal state-variable
 filter for BP/BP2 and two feedback combs for COMB/TRASH. The cutoff and
@@ -104,6 +116,7 @@ third site is chosen so this mod does **not** overlap digihealth 1.0.
 | `filter.c` | modes, coefficients, the comb DSP, the site entry point |
 | `filter_dsp.s` | the per-voice state-variable filter (ColdFire EMAC) |
 | `filter_glue.s` | the raw site entry points (labels + the per-voice dispatcher) |
+| `filter_ui.c` | the FLTR page response-curve `ev_draw` handler (`digifilter_draw`) |
 | `filter_tables.h` | `g`, `k`, frequency and comb-delay tables |
 | `tests/filter_model.py` | floating-point reference (`svf_block`, `comb_gain`) |
 | `tests/digiemu_filter_*.py` | headless digiemu traces/tests (need a digiemu checkout) |
@@ -121,6 +134,7 @@ python tests/filter_model.py
 python tests/digiemu_filter_dsp.py  --digiemu <checkout> --fw <folder> --type 8
 python tests/digiemu_filter_mod.py  --digiemu <checkout> --fw <folder> --type 10
 python tests/digiemu_filter_cutoff.py --digiemu <checkout> --fw <folder>
+python tests/digiemu_filter_curve.py --digiemu <checkout> --fw <folder>
 ```
 
 ## Licence
