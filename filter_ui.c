@@ -145,13 +145,14 @@ static int log2q8(uint32 v)
 /* BP/BP2: the band-pass magnitude of the same trapezoidal SVF the DSP runs
  * (a1 = 1/(1+g(g+k)), c0 = -1, c1 = k, c2 = 0): at the frequency step x, with
  * r = g(x)/g(f): for r <= 1 the response is r*k / sqrt((1-r^2)^2 + (r k)^2)
- * (band gain) -- enough for a UI curve, in half-dB. */
+ * (band gain), in half-dB. k is scaled down (narrow: *3/4, wide: *1/2) so the
+ * bell is narrower than the DSP's as-drawn Q. */
 static int bp_db2(int fi, int qi, int x, int wide)
 {
     int32 g = wide ? G27[fi] << 1 : G27[fi];     /* BP2: roughly double the width */
     /* k in Q16 (k27 >> 11): the products below must stay under 2^32 (the old
      * Q27 k made num^2 wrap, which drew noise). */
-    int32 k = K27[wide ? (qi >> 1) : qi] >> 11;
+    int32 k = (K27[wide ? (qi >> 1) : qi] >> 11) * (wide ? 1 : 3) / (wide ? 2 : 4);
     int32 G = G27[x], t, num, den, n, d;
     /* r = |g(x)/g(f)| in Q16, then the band gain is r*k / sqrt((1-r^2)^2+(r k)^2). */
     if (G <= g)
@@ -207,53 +208,46 @@ static const short COS15[256] = {
      32137,  32285,  32412,  32521,  32609,  32678,  32728,  32757,
 };
 
-/* TRASH: the second comb, kept as the earlier envelope curve (full at the
- * harmonics, dipping between them, RESO raising the peaks); div picks the
- * harmonic series. */
-static int trash_db2(int fi, int qi, int x, int div)
+/* Feedback-comb magnitude |1 / (1 - g e^-jwD)| from the cos of the phase wD
+ * (Q15). log2q8(|den|^2) falls at the teeth (den -> 0) and rises between them,
+ * so 4600 - log2q8(den) peaks at the teeth. g in Q15 (RESO). */
+static int comb_mag(int c, int g)
 {
-    int32 D = COMB_DELAY[fi] / div;
-    int32 f = HZ[x], peak;
-    if (D < 2)
-        D = 2;
-    /* nearest harmonic index of f to the comb's spacing (fs/D ~ 48000/D) */
-    peak = (int32)((f * D + 24000) / 48000);
-    if (peak < 0)
-        peak = 0;
-    /* distance of f from that harmonic, as a fraction of the spacing */
-    {
-        int32 hz = peak * (48000 / D);
-        int32 off = f > hz ? f - hz : hz - f;
-        int32 span = 48000 / D;
-        int32 lift;
-        if (span < 1)
-            span = 1;
-        lift = (qi * 16) - (off * (qi * 16)) / span;      /* peaks up with RESO */
-        return clampi(lift - 24, -100, 100);
-    }
-}
-
-/* COMB: the feedback comb's evenly spaced teeth, sharpening with RESO (g). The
- * device's graph x-axis is logarithmic, so a true harmonic comb crams every
- * tooth into the top octave; the teeth are laid out evenly across the display
- * (their count from FREQ: the harmonics in the audio band, capped so they stay
- * readable). Returned as a -log2 proxy; the draw normalises the curve to the box. */
-static int comb_db2(int fi, int qi, int x)
-{
-    int n = 20000 / HZ[fi];                /* harmonics across 20 Hz .. 20 kHz */
-    int idx, c, g, gc, den;
-    if (n < 3)
-        n = 3;
-    if (n > 8)
-        n = 8;
-    idx = (x * n * 2) % 256;               /* evenly spaced teeth */
-    c = COS15[idx & 255];                  /* cos(wD) in Q15 */
-    g = qi * 2000;                         /* feedback in Q15 (0 .. ~0.92) */
-    gc = mulsh(g, c, 15);
-    den = (1 << 15) + mulsh(g, g, 15) - 2 * gc;
+    int gc = mulsh(g, c, 15);
+    int den = (1 << 15) + mulsh(g, g, 15) - 2 * gc;   /* |1 - g e^-jwD|^2, Q15 */
+    int l;
+    if (den < 0)
+        den = -den;
     if (den < 1)
         den = 1;
-    return -(int)log2q8((uint32)den);      /* shape only */
+    l = log2q8((uint32)den);                          /* ~3840 quiet .. ~4480 */
+    if (l > 4600)
+        l = 4600;
+    return 4600 - l;                                  /* quiet ~240, tooth ~1690 */
+}
+
+/* The tooth phase step per display column, so the teeth are laid out evenly (the
+ * graph x-axis is logarithmic; a literal harmonic comb crams every tooth into the
+ * top octave). FREQ (fi) sets the density across the whole range with no dead
+ * zone, so turning FREQ sweeps the teeth from end to end; Q12 so it is
+ * fractional. The box is only ~50 px, so the step is capped (< 64) to keep the
+ * teeth at least a pixel apart and crisp. */
+#define TOOTH_Q (5 << 12)                      /* step at fi = 0, Q12 */
+#define comb_dstep(fi) (TOOTH_Q + (fi) * ((64 << 12) - TOOTH_Q) / 127)
+
+/* COMB: sharp, evenly spaced teeth (feedback from RESO). */
+static int comb_db2(int fi, int qi, int x)
+{
+    int idx = ((x * comb_dstep(fi)) >> 12) & 255;
+    return comb_mag(COS15[idx], qi * 2000);
+}
+
+/* TRASH: a denser comb (its own series) with a lower feedback, but the same
+ * continuous sweep over FREQ. */
+static int trash_db2(int fi, int qi, int x)
+{
+    int idx = ((x * comb_dstep(fi) * 3 / 2) >> 12) & 255;
+    return comb_mag(COS15[idx], qi * 1100);
 }
 
 static int col2step(int x)
@@ -261,36 +255,35 @@ static int col2step(int x)
     return (x - GX0 - 1) * 127 / (GX1 - GX0 - 2);
 }
 
-static int curve_mn, curve_mx;          /* the built curve's value range */
+#define CH (GY1 - GY0 - 4)              /* the drawn curve's height, in rows */
 
-/* Map the built curve into the graph box: its maximum to the top row, its
- * minimum to the bottom. The modes' raw values use different scales (BP is a
- * real half-dB magnitude, the comb's "lift" is arbitrary), so normalising keeps
- * every mode's shape visible in the small box. */
-static int curve_y(int v)
-{
-    int span = curve_mx - curve_mn;
-    int h = GY1 - GY0 - 4;
-    if (span < 1)
-        span = 1;
-    return GY0 + 2 + (v - curve_mn) * h / span;
-}
-
-/* build the 128-step curve for the active track's mode */
+/* build the logical per-column curve (0 = floor, +CH = peak) for the active
+ * track's mode. The displayed depth scales with FREQ/RESO directly, so turning a
+ * knob moves the curve instead of the normaliser flattening it; it clamps only
+ * at the extreme ends. */
 static void build_curve(int mode, int fi, int qi)
 {
     int x, pass;
-    for (x = 0; x < 128; x++) {
-        if (mode <= FM_BP2)
-            curve[x] = bp_db2(fi, qi, x, mode == FM_BP2);
-        else if (mode == FM_COMB)
-            curve[x] = comb_db2(fi, qi, x);
-        else
-            curve[x] = trash_db2(fi, qi, x, 2);
-    }
-    if (mode <= FM_BP2) {
-        /* the integer ratio/log2 quantisation steps the BP magnitude; smooth
-         * the wobble (a [1,2,1]/4 pass, in place, three times). */
+    if (mode == FM_COMB || mode == FM_TRASH) {
+        /* the teeth sit above the quiet floor; the floor is the comb's own
+         * minimum, so RESO raises the teeth from it (and clamps only at max). */
+        int base = (mode == FM_COMB) ? 240 : 120;
+        for (x = 0; x < 128; x++) {
+            int v = (mode == FM_COMB) ? comb_db2(fi, qi, x)
+                                      : trash_db2(fi, qi, x);
+            int d = v - base;
+            curve[x] = CH * (d < 0 ? 0 : d > 1500 ? 1500 : d) / 1500;
+        }
+    } else {
+        /* BP/BP2: the peak height from Q (deeper with RESO), the shape from the
+         * SVF magnitude, then smoothed (the integer ratio/log2 result steps). */
+        int depth = CH * (5 + qi) / 20;
+        for (x = 0; x < 128; x++) {
+            int32 d = bp_db2(fi, qi, x, mode == FM_BP2);   /* ~ +50 .. -78 dB */
+            if (d > 0)
+                d = 0;
+            curve[x] = (int32)depth * 50 / (50 - d);       /* 0 .. depth */
+        }
         for (pass = 0; pass < 3; pass++) {
             int32 prev = curve[0];
             for (x = 1; x < 127; x++) {
@@ -300,14 +293,14 @@ static void build_curve(int mode, int fi, int qi)
             }
         }
     }
-    curve_mn = 1 << 30;
-    curve_mx = -(1 << 30);
-    for (x = 0; x < 128; x++) {
-        if (curve[x] < curve_mn)
-            curve_mn = curve[x];
-        if (curve[x] > curve_mx)
-            curve_mx = curve[x];
-    }
+}
+
+/* Map the logical curve to a row, then taper it towards the floor at both box
+ * edges so the curve never ends in a vertical "brickwall". */
+static int curve_y(int s, int v)
+{
+    int w = (s < 8) ? s : (s > 119) ? (127 - s) : 8;
+    return GY0 + 2 + v * w / 8;
 }
 
 /* The small type-box glyph: mask the stock "EQ n" artwork and draw a fixed mini
@@ -404,7 +397,8 @@ void digifilter_draw(void *bmp, void *ctrl)
     {
         int prev = -1;
         for (x = GX0 + 1; x < GX1; x++) {
-            int y = curve_y(curve[col2step(x)]);
+            int s = col2step(x);
+            int y = curve_y(s, curve[s]);
             if (prev < 0)
                 prev = y;
             FILLRECT(bmp, x, prev < y ? prev : y, x, prev < y ? y : prev, 1);

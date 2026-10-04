@@ -265,23 +265,22 @@ and paints (see below), and clears the small TYPE box (x 78..92, same rows) and
 draws a fixed mini version of the mode there. The stock page is left untouched
 for stock types.
 
-Curve rendering:
+Curve rendering (the display depth scales with FREQ/RESO directly, so a knob
+sweeps the whole range and clamps only at the extremes):
 
-- **BP/BP2** — the SVF band-pass magnitude at FREQ/RESO in half-dB (the DSP's
-  own `g`/`k` tables), smoothed by three **in-place `[1,2,1]/4` passes** (the
-  integer ratio/log2 quantisation stepped the curve). BP2 uses a lower `k` (wider
-  band). The 0 dB baseline is gone.
-- **COMB** — the feedback comb magnitude `|1 / (1 - g·e^{-jwD})|`, evaluated with
-  a 256-entry Q15 cosine table of the phase `wD = 2πfD/fs` and `log2`, so the
-  teeth sharpen with RESO (g). Because the graph x-axis is logarithmic a literal
-  harmonic comb crams every tooth into the top octave, so the teeth are laid out
-  **evenly across the display**, their count from FREQ (harmonics in 20 Hz–20 kHz,
-  capped at 8 so they stay readable).
-- **TRASH** — the earlier envelope curve (full at the harmonics, dipping between
-  them), series `div 2`.
+- **BP/BP2** — the SVF band-pass magnitude at FREQ/RESO in half-dB (the DSP's own
+  `g`/`k` tables), with `k` scaled down (`*3/4` narrow, `*1/2` wide) so the bell
+  is narrower than the DSP's as-drawn Q, and smoothed by three in-place
+  `[1,2,1]/4` passes. The peak height comes from Q (deeper with RESO).
+- **COMB** — the feedback comb magnitude `|1 / (1 - g·e^{-jwD})|` (a 256-entry
+  Q15 cosine table + `log2`), so the teeth sharpen with RESO. The x-axis is
+  logarithmic, so a literal harmonic comb crams every tooth into the top octave;
+  the teeth are laid out **evenly across the display**, their spacing from FREQ
+  with **no dead zone** (the step is capped so they stay a pixel apart).
+- **TRASH** — the same, denser (its own series) with a lower feedback.
 
-Each curve is normalised into the graph box (its max to the top row, min to the
-bottom) so every mode's shape reads in the small 50-px-wide, ~11-px-tall box.
+Every curve is **tapered towards the floor at both box edges**, so it never ends
+in a vertical "brickwall".
 
 Earlier the curve finder (`digiemu_filter_curve_find.py`) ruled out writing the
 DSP's coefficient RAM; the resolution is the event handler here, not the RAM.

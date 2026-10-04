@@ -26,11 +26,12 @@ Then flash the `.syx` with Elektron Transfer.
 New in 1.0i: the FLTR page's FREQ/RES response curve **and the small TYPE-box
 glyph** are painted for the new modes from a core `ev_draw` handler (so they
 survive multi-mod builds, where patching the page drawView slot was overwritten
-by another mod's `ev_draw` subscription) — a smooth band-pass bell for BP/BP2,
-evenly spaced comb teeth for COMB, and a trash can for TRASH; the filter envelope
-modulates the new modes; the DSP is optimized (no more than the stock filter's
-cost per voice per block); the second FLTR page drives COMB/TRASH
-delay/harmonics/damping/feedback trim.
+by another mod's `ev_draw` subscription) — a narrower, smooth band-pass bell for
+BP/BP2 (no vertical brickwall at the edges) and evenly spaced comb teeth for
+COMB/TRASH whose spacing sweeps across the whole FREQ range and whose depth rises
+with RESO (no dead zones); the filter envelope modulates the new modes; the DSP
+is optimized (no more than the stock filter's cost per voice per block); the
+second FLTR page drives COMB/TRASH delay/harmonics/damping/feedback trim.
 Known issue: **BP (TYPE 8) can clip at some frequencies** (no SVF output
 saturation).
 
