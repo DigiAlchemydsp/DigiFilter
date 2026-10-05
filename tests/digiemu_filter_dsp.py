@@ -120,7 +120,8 @@ def spin(m, pc, *args, **kw):
         uc.ctl_flush_tb()
     r = spin0(m, pc, *args, **kw)
     state["n"] += 1
-    if state["n"] >= a.steps or len(state["out"]) >= 6:
+    # high-feedback combs need many blocks to settle (time const ~ D/(1-g))
+    if state["n"] >= a.steps or len(state["out"]) >= 24:
         E.stop_flag.set()
     return r
 
@@ -152,16 +153,18 @@ if peak > (1 << 30):
     sys.exit(1)
 
 TONE_HZ = 1500.0
+# the DSP caps the resonance range (13/15) for BP and COMB/TRASH (see filter.c)
+qk = a.qi * 13 // 15
 if a.type in (8, 9):
     # BP and BP2 are the SVF band-pass; BP2 uses the k of half the Q step
-    qi = a.qi if a.type == 8 else (a.qi >> 1)
+    qi = qk if a.type == 8 else (qk >> 1)
     x = [math.sin(2 * math.pi * i / N) for i in range(N)]
     yy = FM.svf_block("BP", x * 300, 48000.0, float(HZ[a.fi]), QX10[qi] / 10.0)
     model = max(abs(v) for v in yy[-N:])
 elif a.type == 10:
-    model = FM.comb_gain(TONE_HZ, 48000.0, max(2, COMB_D[a.fi]), a.qi / 16.0)
+    model = FM.comb_gain(TONE_HZ, 48000.0, max(2, COMB_D[a.fi]), qk / 16.0)
 else:
-    model = FM.comb_gain(TONE_HZ, 48000.0, max(2, COMB_D[a.fi] // 2), a.qi / 16.0)
+    model = FM.comb_gain(TONE_HZ, 48000.0, max(2, COMB_D[a.fi] // 2), qk / 16.0)
 err = abs(peak / float(AMP) - model) / max(model, 1e-9)
 print("model |H(f)| = %.5f   dsp = %.5f   rel err %.1f%%" % (model, peak / float(AMP), err * 100))
 ok = err < 0.15

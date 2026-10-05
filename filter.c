@@ -112,9 +112,11 @@ static int clampi(int v, int lo, int hi)
 /* the SVF coefficients and the mode's output mix (A = 1: no band gain) */
 static void mode_coef(int m, int fi, int qi, struct fcoef *c)
 {
-    /* BP2 is the same band-pass but with ~half the resonance (a wider band):
-     * take k from a lower Q step. */
-    int32 g = G27[fi], k = K27[m == FM_BP2 ? (qi >> 1) : qi], d24;
+    /* Cap the resonance range: the top of the k table (Q 8) overshoots and
+     * clips on transients, so limit the maximum Q to index 13 (~Q 5). This is a
+     * coefficient-time change (the hot loop is unchanged). BP2 halves it. */
+    int qk = qi * 13 / 15;
+    int32 g = G27[fi], k = K27[m == FM_BP2 ? (qk >> 1) : qk], d24;
     /* band-pass output mix: out = c1 * band  (c0 cancels the input's v0 term) */
     c->c0 = -ONE27;
     c->c1 = mulsh(k, ONE27, 27);
@@ -256,7 +258,9 @@ static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div,
     if (target > COMB_MASK)
         target = COMB_MASK;
     tdq = target << 16;
-    gt = (int32)qi * (ONE27 / 16);   /* 0 .. 0.9375 */
+    /* Cap the feedback range: 0.9375 is +24 dB at the teeth and clips at some
+     * pitches; 13/16 (+14 dB) keeps the resonance without the runaway. */
+    gt = (int32)(qi * 13 / 15) * (ONE27 / 16);   /* 0 .. 0.8125 */
     if (fbtrim) {
         gt += mulsh(ONE27 - gt, fbtrim, 15);     /* up toward full feedback */
         if (gt > 0x7c000000)

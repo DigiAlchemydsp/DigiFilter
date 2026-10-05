@@ -347,7 +347,9 @@ static int read_track(int *type, int *fi, int *qi)
         return 0;
     *type = ty - FM_FIRST_TYPE;
     *fi = clampi((unsigned)FSLOT(kit, t, FS_FREQ) >> 8, 0, 127);
-    *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 11, 0, 15);
+    /* the DSP caps the resonance range at 13/15 (see filter.c); match it so the
+     * drawn curve shows the same resonance the audio gets. */
+    *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 11, 0, 15) * 13 / 15;
     return 1;
 }
 

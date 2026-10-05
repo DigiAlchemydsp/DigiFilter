@@ -43,10 +43,10 @@ Everything in this repo builds (`BUILT`), lints against `core` and combines with
 
 ## Known issues
 
-- **BP (TYPE 8) can clip at some frequencies.** The band-pass SVF has no output
-  saturation (the comb does), so with high RESO near the pass-band the output
-  can exceed full scale. Back off RESO/ENV depth or use BP2. (Tracked for a
-  soft-clip in the SVF.)
+- **BP (TYPE 8) can still clip on transients.** The band-pass SVF has no output
+  saturation (the comb does), so with high RESO near the pass-band the output can
+  exceed full scale. The resonance range is now capped (Q ~5) to reduce it; back
+  off RESO/ENV depth or use BP2. (Tracked for a soft-clip in the SVF.)
 
 ## Controls
 
@@ -97,8 +97,8 @@ export ELEKLOADER_CROSS=m68k-elf-
 export PYTHONPATH="<elekloader checkout>"
 
 python -m elekloader.sdk.build . --stock <Digitakt_OS1.53.syx>
-python -m elekloader.lint  out/digifilter-1.0i.elemod --stock <Digitakt_OS1.53.syx> --with <core-2.1.elemod>
-python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core-2.1.elemod> --mod out/digifilter-1.0i.elemod --out custom.syx --version 2.0t --check
+python -m elekloader.lint  out/digifilter-1.0j.elemod --stock <Digitakt_OS1.53.syx> --with <core-2.1.elemod>
+python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core-2.1.elemod> --mod out/digifilter-1.0j.elemod --out custom.syx --version 2.0t --check
 ```
 
 That must print `BUILT`, then `OK: links as core 2.1 …`, then `OK: the mods
