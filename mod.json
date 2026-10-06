@@ -1,11 +1,11 @@
 {
  "id": "digifilter",
- "version": "1.0j",
+ "version": "1.0k",
  "title": "Digi Filter",
  "category": "Sound",
  "author": "Digital Alchemy DSP",
  "license": "GPL-2.0-or-later",
-  "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ, RESO and filter envelope: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs). Widens the Filter Type range to 11 and renames the new values, runs the extra DSP at the per-voice filter call (site 0x400780ba -> digifilter_dispatch), and overpaints the FLTR page's FREQ/RES response curve for the new modes from a core ev_draw handler (digifilter_draw: BP/BP2 a band-pass bell, COMB/TRASH comb teeth) when the page kind is 6. Stock TYPE values tail-call the stock filter and keep the stock curve. While COMB/TRASH is selected the second FLTR page's Base/Width/Env Delay/SRR knobs become delay/harmonics/damping/feedback trim. See README.md.",
+  "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ, RESO and filter envelope: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs). Widens the Filter Type range to 11 and renames the new values, runs the extra DSP at the per-voice filter call (site 0x400780ba -> digifilter_dispatch), and overpaints the FLTR page's FREQ/RES response curve for the new modes from a core ev_draw handler (digifilter_draw: BP/BP2 a band-pass bell, COMB/TRASH comb teeth) when the page kind is 6. Stock TYPE values tail-call the stock filter and keep the stock curve. While COMB/TRASH is selected the RESO/GAIN knob is the comb feedback (0..127) and the second FLTR page's free C/G encoders add Harmonics/Damping controls (labelled HARM/DAMP), alongside the stock Base/Width/Env Delay/SRR knobs which keep working. See README.md.",
  "device": "digitakt-mk1",
  "os": "1.53",
  "sources": [

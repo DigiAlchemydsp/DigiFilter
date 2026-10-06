@@ -4,6 +4,47 @@ All notable changes to DigiFilter. Format-2
 [elekloader](https://github.com/irpina/elekloader) mod for the Elektron
 Digitakt **mk1, OS 1.53**. Versioned as `<major>.<minor><letter>`.
 
+## [1.0k] - 2026-10-05
+
+The second FLTR page gets its own COMB/TRASH controls, alongside the stock ones.
+
+### Added
+
+- While a track's TYPE is COMB or TRASH, the **RESO / GAIN knob on page 1** is
+  the comb's feedback (0…127, up to **31/32** — near self-oscillation, for a
+  metallic ringing comb), and the second FLTR page's free encoders add
+  **C = Harmonics** (delay divider 1–4) and **G = Damping** (a one-pole on the
+  feedback), labelled **HARM / DAMP** and drawn as round dials like the stock
+  SRR knob.
+
+### Fixed
+
+- **BP (TYPE 8) no longer distorts** on hot material (notably FREQ 44–60): the
+  SVF output is now saturated to ±2^27 like the comb, so a high-Q peak clips
+  cleanly instead of wrapping the 32-bit sample.
+
+### Changed
+
+- The stock **Base / Width / Env Delay / SRR** controls are **not** replaced —
+  they stay on their own encoders and keep saving with the kit, together with
+  the new controls. The comb DSP uses the RESO/GAIN feedback and the new
+  Harmonics/Damping only; there is no separate feedback control on page 2.
+- The FLTR page-1 response curve's comb depth now follows the RESO/GAIN knob.
+
+### Internals
+
+- On each UI tick, when the active track is COMB/TRASH, `filter_ui.c:page2_setup`
+  commandeers two unused `Error` descriptors (`14/15`) as real filter descriptors
+  on spare sound slots (`0x2f/0x30`) and puts them on C/G; the stock layout and
+  descriptors are restored for every other TYPE.
+- The two values live in the spare slots. For kit persistence they are mirrored
+  (0..127, stored as value+1) into the low bytes of the savable Base / Width
+  words, which are otherwise always 0, and the spare slots are restored from them
+  after a load. (The sound serializer only carries slots 0..45; the spare slots
+  fall outside it.)
+- New test `tests/digiemu_filter_page2.py`; the DSP/envelope/curve tests updated
+  for the new controls.
+
 ## [1.0j] - 2026-10-05
 
 Resonance-range caps; less clipping / runaway on the new modes.

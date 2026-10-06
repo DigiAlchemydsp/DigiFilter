@@ -31,13 +31,16 @@ ap.add_argument("--digiemu", required=True)
 ap.add_argument("--fw", required=True)
 ap.add_argument("--type", type=int, default=8)
 ap.add_argument("--fi", type=int, default=64, help="base FREQ index (0..127)")
-ap.add_argument("--qi", type=int, default=8, help="RESO index (0..15)")
+ap.add_argument("--qi", type=int, default=8, help="RESO index (0..15) for BP/BP2")
+ap.add_argument("--fb", type=int, default=None, help="comb Feedback (0..127); default from --qi")
 ap.add_argument("--envw", type=lambda s: int(s, 0), default=0x6000,
                 help="ENV DEPTH word (0x4000 = 0)")
 ap.add_argument("--env", type=lambda s: int(s, 0), default=-1073741824,
                 help="forced per-voice envelope level (signed int32)")
 ap.add_argument("--steps", type=int, default=900)
 a = ap.parse_args()
+if a.fb is None:
+    a.fb = a.qi * 127 // 15
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -96,7 +99,9 @@ def call_hook(u, address, size, user):
     u.mem_write(params, bytes([a.type]))
     u.mem_write(params + 2, struct.pack(">H", a.fi << 8))        # FREQ base
     u.mem_write(params + 6, struct.pack(">H", a.envw))          # ENV DEPTH
-    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", a.qi << 11))
+    # RESO engine slot 0x1b: BP/BP2 resonance, or the comb Feedback (0..127)
+    reso = (a.qi << 11) if a.type in (8, 9) else (a.fb << 8)
+    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", reso))
     u.mem_write(ENV + 12 * voice, struct.pack(">i", a.env))     # envelope level
     u.mem_write(buf, struct.pack(">%di" % N, *TONE))
     state["buf"] = buf
@@ -154,8 +159,9 @@ if peak == 0:
     sys.exit(1)
 
 mode = {8: "BP", 9: "BP2", 10: "COMB", 11: "TRASH"}[a.type]
+qk = a.qi * 13 // 15                       # filter.c caps the SVF resonance (13/15)
 if a.type in (8, 9):
-    q = a.qi if a.type == 8 else (a.qi >> 1)
+    q = qk if a.type == 8 else (qk >> 1)
     x = [math.sin(2 * math.pi * i / N) for i in range(N)]
     yy = FM.svf_block("BP", x * 300, 48000.0, float(HZ[fi_exp]), QX10[q] / 10.0)
     model = max(abs(v) for v in yy[-N:])
@@ -163,7 +169,7 @@ else:
     import re as _re
     co = [int(x) for x in _re.findall(r"\d+", txt.split("COMB_DELAY[128]")[1].split("};")[0])]
     div = 1 if a.type == 10 else 2
-    model = FM.comb_gain(1500.0, 48000.0, max(2, co[fi_exp] // div), a.qi / 16.0)
+    model = FM.comb_gain(1500.0, 48000.0, max(3, co[fi_exp] // div), a.fb * 31.0 / (127.0 * 32.0))
 err = abs(peak / float(AMP) - model) / max(model, 1e-9)
 print("mode=%s model |H|=%.5f dsp=%.5f rel err %.1f%%" % (mode, model, peak / float(AMP), err * 100))
 ok = err < 0.15

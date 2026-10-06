@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Validate the second FLTR page's COMB controls (delay offset, harmonics).
+"""Validate the second FLTR page's COMB controls (Feedback, Harmonics).
 
-Forces voice 0's TYPE (10 COMB / 11 TRASH), FREQ, RESO, and writes the second
-page words Base (params+0x10, slot 0x21) and Width (params+0x12, slot 0x22).
-The comb delay becomes COMB_DELAY[fi] / (div * hdiv) + (base >> 8), and the
-output peak is compared with tests/filter_model.py comb_gain.
+Forces voice 0's TYPE (10 COMB / 11 TRASH), FREQ and the second page's comb
+controls: Feedback (params+0x10, slot 0x21) and Harmonics (params+0x14, slot
+0x23). The comb becomes COMB_DELAY[fi] / (div * (1 + harm*3/127)) with feedback
+g = fb*13/2032, and the output peak is compared with tests/filter_model.py
+comb_gain.
 
     python tests/digiemu_filter_comb2.py --digiemu <checkout> --fw <folder> \
-        --type 10 --fi 100 --qi 8 --base 0x4000 --width 0x4000
+        --type 10 --fi 100 --fb 64 --harm 0
 """
 import argparse
 import math
@@ -22,9 +23,8 @@ ap.add_argument("--digiemu", required=True)
 ap.add_argument("--fw", required=True)
 ap.add_argument("--type", type=int, default=10)
 ap.add_argument("--fi", type=int, default=100)
-ap.add_argument("--qi", type=int, default=8)
-ap.add_argument("--base", type=lambda s: int(s, 0), default=0, help="slot 0x21 word")
-ap.add_argument("--width", type=lambda s: int(s, 0), default=32512, help="slot 0x22 word")
+ap.add_argument("--fb", type=int, default=64, help="Feedback 0..127 (slot 0x21)")
+ap.add_argument("--harm", type=int, default=0, help="Harmonics 0..127 (slot 0x23)")
 ap.add_argument("--steps", type=int, default=900)
 a = ap.parse_args()
 
@@ -83,9 +83,9 @@ def call_hook(u, address, size, user):
     u.mem_write(params, bytes([a.type]))
     u.mem_write(params + 2, struct.pack(">H", a.fi << 8))
     u.mem_write(params + 6, struct.pack(">H", 0x4000))          # no env
-    u.mem_write(params + 0x10, struct.pack(">H", a.base))       # Base 0x21
-    u.mem_write(params + 0x12, struct.pack(">H", a.width))      # Width 0x22
-    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", a.qi << 11))
+    # Feedback is the RESO/GAIN knob: engine slot 0x1b, 0..127 << 8
+    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", a.fb << 8))
+    u.mem_write(params + 0x2c, struct.pack(">H", a.harm << 8))  # Harmonics 0x2f
     u.mem_write(buf, struct.pack(">%di" % N, *TONE))
     state["buf"] = buf
     state["cap"] = 1
@@ -115,9 +115,8 @@ def spin(m, pc, *args, **kw):
 
 
 div = 1 if a.type == 10 else 2
-hdiv = 1 + ((32512 - a.width) * 3) // 32512
-dly_off = a.base >> 8
-delay = COMB_D[a.fi] // (div * hdiv) + dly_off
+hdiv = 1 + a.harm * 3 // 127
+delay = COMB_D[a.fi] // (div * hdiv)
 delay = max(3, min(255, delay))
 
 G.spin = spin
@@ -129,10 +128,10 @@ if len(state["out"]) < 3:
     sys.exit(1)
 out = state["out"][-1]
 peak = max(abs(v) for v in out)
-model = FM.comb_gain(1500.0, 48000.0, delay, a.qi / 16.0)
+model = FM.comb_gain(1500.0, 48000.0, delay, a.fb * 31.0 / (127.0 * 32.0))
 err = abs(peak / float(AMP) - model) / max(model, 1e-9)
-print("TYPE=%d fi=%d qi=%d base=0x%04x width=0x%04x -> hdiv=%d dly_off=%d delay=%d"
-      % (a.type, a.fi, a.qi, a.base, a.width, hdiv, dly_off, delay))
+print("TYPE=%d fi=%d fb=%d harm=%d -> hdiv=%d delay=%d"
+      % (a.type, a.fi, a.fb, a.harm, hdiv, delay))
 print("model |H|=%.5f dsp=%.5f rel err %.1f%%" % (model, peak / float(AMP), err * 100))
 ok = err < 0.15
 print("PASS" if ok else "FAIL")

@@ -28,9 +28,15 @@ ap.add_argument("--digiemu", required=True)
 ap.add_argument("--fw", required=True)
 ap.add_argument("--type", type=int, default=8, help="TYPE to force (8..11)")
 ap.add_argument("--fi", type=int, default=100, help="forced FREQ index (0..127)")
-ap.add_argument("--qi", type=int, default=8, help="forced RESO index (0..15)")
+ap.add_argument("--qi", type=int, default=8, help="forced RESO index (0..15) for BP/BP2")
+ap.add_argument("--fb", type=int, default=None, help="forced comb Feedback (0..127); default from --qi")
+ap.add_argument("--harm", type=int, default=0, help="forced comb Harmonics (0..127)")
+ap.add_argument("--amp", type=lambda s: int(s, 0), default=1 << 20, help="input tone amplitude")
+ap.add_argument("--tone", type=float, default=1500.0, help="input tone frequency (Hz)")
 ap.add_argument("--steps", type=int, default=900)
 a = ap.parse_args()
+if a.fb is None:                       # keep the old --qi driving the feedback
+    a.fb = a.qi * 127 // 15
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -66,9 +72,9 @@ import emu.gui as G  # noqa: E402
 SNAP = [os.path.join(dp, f) for dp, _, fs in os.walk(FW + "/snapshots") for f in fs if f == "gui.snap"][0]
 CALL, RET = 0x400780BA, 0x400780C6      # dispatch (chooses a3); then after the call
 FREQ = 0x80001F18
-AMP = 1 << 20
+AMP = a.amp
 N = 32
-TONE = [int(AMP * math.sin(2 * math.pi * i / N)) for i in range(N)]  # 1500 Hz @ 48k
+TONE = [int(AMP * math.sin(2 * math.pi * a.tone * i / 48000.0)) for i in range(N)]
 
 state = {"n": 0, "blocks": 0, "out": [], "buf": 0, "cap": 0}
 
@@ -96,7 +102,11 @@ def call_hook(u, address, size, user):
     buf = 0x80001A18 + d0
     u.mem_write(params, bytes([a.type]))                     # force TYPE (read by the dispatch)
     u.mem_write(params + 2, struct.pack(">H", a.fi << 8))    # CUTOFF (index<<8)
-    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", a.qi << 11))
+    # RESO engine slot 0x1b: BP/BP2 resonance index, or the comb Feedback (0..127)
+    reso = (a.qi << 11) if a.type in (8, 9) else (a.fb << 8)
+    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", reso))
+    # COMB/TRASH second-page Harmonics (slot 0x2f at params + 0x2c)
+    u.mem_write(params + 0x2c, struct.pack(">H", a.harm << 8))
     u.mem_write(buf, struct.pack(">%di" % N, *TONE))         # the test input
     state["buf"] = buf
     state["cap"] = 1
@@ -152,8 +162,9 @@ if peak > (1 << 30):
     print("FAIL: output looks unstable (%d)" % peak)
     sys.exit(1)
 
-TONE_HZ = 1500.0
-# the DSP caps the resonance range (13/15) for BP and COMB/TRASH (see filter.c)
+TONE_HZ = a.tone
+# BP/BP2 cap the resonance range (13/15) in filter.c; COMB/TRASH feedback now
+# comes from the Feedback knob (0..127 -> 13/16 max), harmonics sets the divider.
 qk = a.qi * 13 // 15
 if a.type in (8, 9):
     # BP and BP2 are the SVF band-pass; BP2 uses the k of half the Q step
@@ -161,10 +172,12 @@ if a.type in (8, 9):
     x = [math.sin(2 * math.pi * i / N) for i in range(N)]
     yy = FM.svf_block("BP", x * 300, 48000.0, float(HZ[a.fi]), QX10[qi] / 10.0)
     model = max(abs(v) for v in yy[-N:])
-elif a.type == 10:
-    model = FM.comb_gain(TONE_HZ, 48000.0, max(2, COMB_D[a.fi]), qk / 16.0)
 else:
-    model = FM.comb_gain(TONE_HZ, 48000.0, max(2, COMB_D[a.fi] // 2), qk / 16.0)
+    hdiv = 1 + a.harm * 3 // 127
+    div = 1 if a.type == 10 else 2
+    delay = max(3, min(255, COMB_D[a.fi] // (div * hdiv)))
+    g = a.fb * 31.0 / (127.0 * 32.0)
+    model = FM.comb_gain(TONE_HZ, 48000.0, delay, g)
 err = abs(peak / float(AMP) - model) / max(model, 1e-9)
 print("model |H(f)| = %.5f   dsp = %.5f   rel err %.1f%%" % (model, peak / float(AMP), err * 100))
 ok = err < 0.15

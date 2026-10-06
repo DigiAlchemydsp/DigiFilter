@@ -5,8 +5,11 @@
  * the stock range (FM_FIRST_TYPE + mode) select an extra mode. BP/BP2 run a
  * trapezoidal state-variable filter (Simper / Zavalishin, the same kernel as
  * Digi EQ's eq_dsp.s) with the track's own FREQ, RESO and filter envelope;
- * COMB/TRASH run a feedback comb, with the second FLTR page's Base / Width /
- * Env Delay / SRR knobs reused as delay, harmonics, damping and feedback trim.
+ * COMB/TRASH run a feedback comb: the RESO/GAIN knob is the comb feedback, and
+ * the second FLTR page's free encoders C / G add Harmonics / Damping
+ * (filter_ui.c commandeers unused descriptors for them), alongside the stock
+ * Base / Width / Env Delay / SRR knobs, which keep working. Those two values
+ * live in spare sound slots (0x2f/0x30).
  *
  * The filter envelope (FLTR slot 0x1c, params@6) is applied exactly as the
  * stock filter does (see cutoff_index): the engine writes a per-voice envelope
@@ -40,10 +43,12 @@ typedef unsigned int uint32;
 #define FS_TYPE 0x19
 #define FS_FREQ 0x1a
 #define FS_RESO 0x1b
-#define FS_BASE 0x21
-#define FS_WIDTH 0x22
-#define FS_ENVDELAY 0x23
-#define FS_SRR 0x24
+/* COMB/TRASH second-page storage: two spare sound slots, driven by the free
+ * encoders C/G (filter_ui.c commandeers unused descriptors for them). The
+ * stock Base/Width/Env Delay/SRR slots are left to their own controls, and the
+ * comb feedback is the RESO/GAIN knob (slot 0x1b) itself. */
+#define FS_HARM 0x2f            /* C: harmonics (delay divider 1..4) */
+#define FS_DAMP 0x30            /* G: damping on the feedback */
 
 /* ---- the extra modes (TYPE = FM_FIRST_TYPE + mode) ----
  * Notch/all-pass/peak are already covered by the stock filter types, so the
@@ -164,6 +169,36 @@ static void commit(void)
         }
 }
 
+/* Best-effort kit persistence for the new comb controls. The two values live in
+ * the spare sound slots 0x2f/0x30, which the sound serializer (a permutation of
+ * the 46 savable slots 0..45) does not carry. So we also mirror each value
+ * (0..127, stored as value+1 so 0 means "empty") into the low byte of two
+ * savable filter words we keep — Base (0x21), Width (0x22) — whose low byte is
+ * otherwise always 0. A loaded kit restores the spare slots from those low
+ * bytes. The stock high bytes are untouched. */
+static void df_persist(void)
+{
+    unsigned char *kit = UI_KIT;
+    static const int spare[2] = { FS_HARM, FS_DAMP };
+    static const int donor[2] = { 0x21, 0x22 };
+    int t, i;
+    if (!kit)
+        return;
+    for (t = 0; t < 8; t++) {
+        unsigned char *b = SOUND(kit, t) + 0x14;
+        for (i = 0; i < 2; i++) {
+            volatile unsigned short *sp = (volatile unsigned short *)(b + 2 * spare[i]);
+            volatile unsigned short *dc = (volatile unsigned short *)(b + 2 * donor[i]);
+            unsigned v = *sp >> 8;
+            unsigned lo = *dc & 0xff;
+            if (v == 0 && lo != 0)
+                *sp = (unsigned short)((lo - 1) << 8);            /* after a kit load */
+            else if (lo != v + 1)
+                *dc = (unsigned short)((*dc & 0xff00) | (v + 1)); /* keep it saved */
+        }
+    }
+}
+
 /* ---- integration points ---- */
 
 /* The render calls, per voice, the stock per-voice filter
@@ -212,16 +247,15 @@ static void commit(void)
  * Verified live: turning the second-page knobs moves these words. */
 #define PARAM_SLOT(params, s) (*(volatile unsigned short *)((params) + 2 * (s) - 0x32))
 
-/* ---- COMB second FLTR page (slots 0x21..0x24) ----
- * COMB/TRASH reuse the second page, which the stock filter uses as Base / Width
- * / Env Delay / SRR while it runs — but it does not run for our types, so those
- * knobs are free. Defaults (Base 0, Width max, Env Delay 0, SRR 0) leave the
- * comb exactly as it was:
- *   Base 0x21   delay offset (coarse), 0..127 samples added to the FREQ delay
- *   Width 0x22  harmonics: divider multiplier 1..4 (max width = 1 = no change)
- *   EnvDelay 0x23  damping: 0 = off, else a one-pole on the feedback
- *   SRR 0x24    feedback trim: pushes the RESO feedback toward self-oscillation
- */
+/* ---- COMB second FLTR page ----
+ * The comb feedback is the RESO/GAIN knob on page 1 (slot 0x1b): it combines
+ * the stock resonance/gain control and the comb feedback, 0..127. On the
+ * second FLTR page filter_ui.c commandeers two unused descriptors for Harmonics
+ * / Damping on the free C/G encoders, leaving the stock Base/Width/Env Delay/
+ * SRR knobs untouched. The DSP reads those two spare sound slots:
+ *   Harmonics 0x2f (C)  0..127 -> delay divider 1 + h*3/127 (1..4)
+ *   Damping   0x30 (G)  raw word -> one-pole on the feedback (0 = off)
+ * Their defaults (0) leave the plain comb. */
 
 /* ---- COMB state (per voice) ---- */
 #define COMB_N 256                   /* power of two: delay wraps with a mask */
@@ -241,16 +275,15 @@ static int prev_filt_type[8];        /* reset state when the mode changes */
 #define COMB_GSHIFT 7
 
 /* Feedback comb, fractional and smoothed: y = x + g*y[n-D]. D = COMB_DELAY[fi]
- * / div (clamped 3..255), g from RESO. COMB uses div 1; TRASH uses div 2 for a
- * higher (different) harmonic series. The delay is interpolated (linear) so it
- * can move continuously; the output is saturated so high feedback cannot run
- * away at the extreme cutoffs. */
-static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div,
-                     int dly_off, int hdiv, int damp, int fbtrim)
+ * / (div * hdiv) (clamped 3..255), g from the RESO/GAIN knob. COMB uses div 1;
+ * TRASH uses div 2 for a higher (different) harmonic series. The delay is
+ * interpolated (linear) so it can move continuously; the output is saturated so
+ * high feedback cannot run away at the extreme cutoffs. */
+static void comb_run(int32 *buf, int frames, int fi, int fb, int v, int div,
+                     int hdiv, int damp)
 {
-    /* Harmonics: an extra divider on top of the mode's own (COMB 1 / TRASH 2).
-     * Width 0x22 at max (the default) -> 1 (no change). */
-    int32 target = COMB_DELAY[fi] / (div * hdiv) + dly_off;
+    /* Harmonics adds a divider on top of the mode's own (COMB 1 / TRASH 2). */
+    int32 target = COMB_DELAY[fi] / (div * hdiv);
     int32 tdq, gt, *b = comb_buf[v];
     int p, i;
     if (target < 3)
@@ -258,14 +291,9 @@ static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div,
     if (target > COMB_MASK)
         target = COMB_MASK;
     tdq = target << 16;
-    /* Cap the feedback range: 0.9375 is +24 dB at the teeth and clips at some
-     * pitches; 13/16 (+14 dB) keeps the resonance without the runaway. */
-    gt = (int32)(qi * 13 / 15) * (ONE27 / 16);   /* 0 .. 0.8125 */
-    if (fbtrim) {
-        gt += mulsh(ONE27 - gt, fbtrim, 15);     /* up toward full feedback */
-        if (gt > 0x7c000000)
-            gt = 0x7c000000;         /* stay short of runaway */
-    }
+    /* Feedback 0..127 -> 0 .. 31/32: near self-oscillation for a metallic,
+     * ringing comb. The per-sample output saturation below keeps it bounded. */
+    gt = (int32)fb * ((ONE27 / 32) * 31 / 127);
     if (!comb_init[v]) {
         comb_init[v] = 1;
         comb_dly[v] = tdq;           /* start at the target, no glide-in */
@@ -291,7 +319,7 @@ static void comb_run(int32 *buf, int frames, int fi, int qi, int v, int div,
         fa = fp >> 1;
         da = (b[i1] - b[i0]) >> 13;
         val = b[i0] + ((fa * da) >> 2);
-        if (damp) {                  /* Env Delay 0x23: darken the tail */
+        if (damp) {                  /* Damping: darken the tail */
             comb_lp[v] += (val - comb_lp[v]) >> 4;
             val += mulsh(comb_lp[v] - val, damp, 15);
         }
@@ -393,15 +421,14 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
             if (m <= FM_BP2) {
                 svf_run(m, fi, qi, buf, voice);
             } else {
-                /* Second FLTR page (slots 0x21..0x24): delay offset, harmonics,
-                 * damping, feedback trim. Defaults leave the comb unchanged. */
-                int width = (int)(unsigned)PARAM_SLOT(params, FS_WIDTH);
-                int dly_off = (int)(unsigned)PARAM_SLOT(params, FS_BASE) >> 8;
-                int hdiv = 1 + ((32512 - width) * 3) / 32512;    /* 1..4 */
-                int damp = (int)(unsigned)PARAM_SLOT(params, FS_ENVDELAY);
-                int fbtrim = (int)(unsigned)PARAM_SLOT(params, FS_SRR);
-                int div = (m == FM_COMB) ? 1 : 2;                /* TRASH = div 2 */
-                comb_run(buf, 32, fi, qi, voice, div, dly_off, hdiv, damp, fbtrim);
+                /* Comb feedback is the RESO/GAIN knob (engine slot 0x1b, 0..127);
+                 * C/G on the second FLTR page add Harmonics / Damping. */
+                int fb = (int)(unsigned)SET_RESO(voice) >> 8;               /* 0..127 */
+                int harm = (int)(unsigned)PARAM_SLOT(params, FS_HARM) >> 8; /* 0..127 */
+                int damp = (int)(unsigned)PARAM_SLOT(params, FS_DAMP);
+                int hdiv = 1 + harm * 3 / 127;                 /* 1..4 */
+                int div = (m == FM_COMB) ? 1 : 2;              /* TRASH = div 2 */
+                comb_run(buf, 32, fi, fb, voice, div, hdiv, damp);
             }
             return 1;
         }
@@ -420,18 +447,15 @@ void digifilter_voice(int v, int32 *buf, int frames)
     digifilter_svf(buf, frames, (const int32 *)&s->v[v], dsp_st[v]);
 }
 
-/* Every UI frame: pick up the pattern's settings. */
+/* filter_ui.c: re-map the second FLTR page (kind 7) for COMB/TRASH. */
+extern void digifilter_page2_sync(void);
+
+/* Every UI frame: pick up the pattern's settings and keep the second FLTR
+ * page's controls (the free C/G encoders) in step with the active track. */
 void digifilter_tick(void *ctrl)
 {
     (void)ctrl;
     commit();
-}
-
-/* FLTR view knob listener. TODO(RE): needs the view kind, the current track and
- * the stock handler to chain to. Returns 0 (not taken) until then. */
-int digifilter_enc(void *view, void *ev)
-{
-    (void)view;
-    (void)ev;
-    return 0;
+    digifilter_page2_sync();
+    df_persist();
 }

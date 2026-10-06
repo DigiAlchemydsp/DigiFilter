@@ -66,7 +66,18 @@ digifilter_svf:
         movclr.l %acc0, %d1
         asl.l   #4, %d1
         add.l   %d1, %d0
-        move.l  %d0, (%a0)
+        | saturate the output to +-2^27 (as the comb does): a high-Q peak clips
+        | there instead of wrapping the 32-bit sample (BP distortion fix)
+        move.l  #0x08000000, %d1
+        cmp.l   %d1, %d0
+        ble.s   .Lc1
+        move.l  %d1, %d0
+        bra.s   .Lc2
+.Lc1:   neg.l   %d1
+        cmp.l   %d1, %d0
+        bge.s   .Lc2
+        move.l  %d1, %d0
+.Lc2:   move.l  %d0, (%a0)
         addq.l  #4, %a0
         subq.l  #1, %d7
         bne.b   .Ls

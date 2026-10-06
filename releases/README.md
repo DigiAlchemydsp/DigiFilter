@@ -4,10 +4,10 @@ Prebuilt DigiFilter for the **Digitakt mk1, OS 1.53**.
 
 | file | |
 |---|---|
-| `elemods/digifilter-1.0j.elemod` | the mod (current) |
-| `DigiFilter-1.0j.zip` | the release package: `elemods/` + `sources/` + README (install/build) + LICENSE |
-| `elemods/digifilter-1.0i.elemod`, `DigiFilter-1.0i.zip` | the previous release |
-| `elemods/digifilter-1.0h.elemod`, `DigiFilter-1.0h.zip` | the first release |
+| `elemods/digifilter-1.0k.elemod` | the mod (current) |
+| `DigiFilter-1.0k.zip` | the release package: `elemods/` + `sources/` + README (install/build) + LICENSE |
+| `elemods/digifilter-1.0j.elemod`, `DigiFilter-1.0j.zip` | the previous release |
+| `elemods/digifilter-1.0i.elemod`, `DigiFilter-1.0i.zip`, `elemods/digifilter-1.0h.elemod`, `DigiFilter-1.0h.zip` | earlier releases |
 
 The `.elemod` needs `core` (e.g. `core-2.1.elemod`, from
 [elekloader](https://github.com/irpina/elekloader)) and the stock OS file
@@ -19,11 +19,20 @@ Install:
 
 ```sh
 python -m elekloader.patch --stock Digitakt_OS1.53.syx \
-    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.0j.elemod \
+    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.0k.elemod \
     --out Digitakt_OS1.53-digifilter.syx --version 2.0t
 ```
 
 Then flash the `.syx` with Elektron Transfer.
+
+New in 1.0k: while TYPE is COMB or TRASH the **RESO / GAIN** knob is the comb
+feedback (0…127, up to 31/32 — near self-oscillation for a metallic ring), and
+the second FLTR page's free encoders add **C = Harmonics** and **G = Damping**
+(labelled HARM/DAMP, round dials like SRR) — **alongside** the stock
+**Base / Width / Env Delay / SRR** knobs, which keep working and saving. The new
+values are mirrored into saved kit words (best-effort persistence). Also fixed:
+**BP (TYPE 8)** output is now saturated, so it no longer distorts on hot
+material. See [../CHANGELOG.md](../CHANGELOG.md).
 
 New in 1.0j: the resonance range is capped for the new modes so they no longer
 clip or run away — BP/BP2 use a maximum Q of ~5, COMB/TRASH a feedback of 13/16

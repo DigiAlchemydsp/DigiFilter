@@ -175,10 +175,10 @@ press can hit `CLEAR SEQUENCE`).
 
 - **FREQ/RES response curve**: SOLVED (§10.4) — the FLTR page drawView is hooked
   and paints the BP/BP2/COMB/TRASH curves. Cosmetic only; audio is unaffected.
-- **BP (TYPE 8) clips at some frequencies**: the SVF (`filter_dsp.s`) does not
-  saturate its output (the comb does), so high RESO near the pass-band can run
-  past full scale. A soft-clip in the kernel would fix it; for now document it
-  (README "Known issues").
+- **BP (TYPE 8) clipped at some frequencies**: FIXED (1.0k). The SVF
+  (`filter_dsp.s`) now saturates its output to ±2^27 (like the comb), so a hot
+  high-Q peak clips cleanly instead of wrapping the 32-bit sample. A soft-clip
+  would be gentler but the hard clip is what the comb uses.
 - **Empirical save/reload** of TYPE 8..11: the PATTERN MENU (key 17) →
   "SAVE PATTERN TO PROJECT?" (`0x401c4418`) + YES, then `emu.portable
   --rebuild`; static analysis says it round-trips (§8).
@@ -212,6 +212,11 @@ env_level    = *(int32*)(0x4199df58 + voice*12)
   (BP, BP2, COMB; depth up/down and depth 0 control).
 
 ### 10.2 The second FLTR page: comb controls [L]
+
+> **Superseded by §12 (1.0k):** this was the 1.0i design that reused the stock
+> Base/Width/Env Delay/SRR slots. 1.0k keeps those stock controls and puts the
+> comb's own Harmonics/Damping on the free C/G encoders, with the feedback on
+> the RESO/GAIN knob.
 
 The render params record carries every slot; slot `s` is at `params + 2s -
 0x32`. Turning the second page's knobs moves these words (Base 0x21 at `+0x10`,
@@ -334,3 +339,81 @@ active TYPE is 8..11. The `0x401842a0` site is gone (3 sites now). This composes
 with the event chain instead of fighting it; `elekloader.lint` reports the
 combined `core + digifilter + digimatrix` set still links with no overlap, and
 the title-page curve test passes on that combined build.
+
+---
+
+## 12. The second FLTR page: extra COMB/TRASH controls beside the stock ones [S][L]
+
+The track-parameter page layouts are a **kind -> 44-byte entry** table in RAM:
+`0x400657b2(kind)` returns `0x4197cf88 + kind*44` for `kind <= 19` (else -1).
+An entry's `+8..+39` are the **8 encoder descriptor ids** (32-bit each);
+descriptor id **0 is the empty dotted box**. The descriptor table is
+`0x401a9d9c`, `0x34` bytes each; a descriptor's knob **short-name pointer is at
+`+0x30`** (its long name at `+0x28`, group at `+0x2c`).
+
+Read live from the snapshot, the two FLTR pages are
+
+| kind | page | ids A..H |
+|---|---|---|
+| 6 | FLTR (page 1) | `34,35,36,37,30,32,33,38` (ATK,DEC,SUS,REL,FREQ,RESO,TYPE,ENV) |
+| 7 | FLTR (page 2) | `39,0,0,42,40,41,0,43` (EnvDel, —, —, SRR, Base, Width, —, Routing) |
+
+so on page 2 the **B, C, G encoders are unassigned** (id 0). Descriptors
+`0..16` are unused `Error` placeholders (group `0xffff`, slot `0xffff`), so they
+can be repurposed. The UI main loop's encoder dispatch is the `ev_enc` event
+(`f(brain, ev)`, `ev+12` encoder 1-8, `ev+16` delta; stock path `0x40008550`).
+
+**Feedback = the RESO/GAIN knob.** Slot `0x1b` is both the filter `Gain` and
+`Resonance` descriptor (ids 31/32); on the FLTR page its label reads `GAIN`. For
+COMB/TRASH that knob is the comb **feedback**, 0..127 (`RESO_word >> 8`, engine
+slot `0x80001502+106v+0x36`), i.e. it combines the stock resonance/gain control
+and the comb feedback, and it drives the response-curve teeth up. The feedback
+maps 0..127 to **0 .. 31/32** (`gt = fb * ((ONE27/32)*31/127)`), near
+self-oscillation for a metallic ringing comb; the per-sample output saturation
+keeps it bounded. So there is no separate feedback control on page 2.
+
+**Implementation (1.0k).** Rather than catch encoder events and paint text, the
+mod lets the stock input/display path do the work (`filter_ui.c:page2_setup`,
+called every `ev_tick`). When the active track's TYPE is COMB/TRASH it
+**commandeers two `Error` descriptors** (`14/15`) into real filter descriptors —
+group 6, a spare sound slot, range `0x7f00`, step `0x0100`, and the mod's
+`HARM`/`DAMP` short names — and puts them in the free C/G slots of the kind-7
+layout:
+
+```
+stock = [39, 0,  0, 42, 40, 41, 0,  43]
+comb  = [39, 0, 14, 42, 40, 41, 15, 43]   (14->slot 0x2f, 15->0x30)
+         A   B   C   D   E   F   G   H
+```
+
+The stock Base/Width/Env Delay/SRR/Routing knobs (ids 39/40/41/42/43) are left
+exactly as they are, so both sets coexist; B stays an empty box. Any other TYPE
+restores the stock layout and the original `Error` descriptor bytes.
+
+The new values land in **spare sound slots 0x2f/0x30**, which the engine copies
+with the other 53 words, so the DSP reads them from the render record (slot s at
+`params + 2s - 0x32`, so 0x2f at `+0x2c`). The **sound serializer**, however, is
+a permutation of the 46 savable slots **0..45** (`§8`), so those spare slots are
+not part of a saved sound. For kit persistence the values (0..127, stored as
+`value+1` so 0 means empty) are **mirrored into the low byte of Base/Width** —
+which are savable and otherwise always 0 — and the spare slots are restored from
+those low bytes after a load (`filter.c:df_persist`). The stock high bytes are
+never touched.
+
+Validated live by `tests/digiemu_filter_page2.py`: with TYPE=10, A/D/E/F/H move
+the stock slots (`0x23/0x24/0x21/0x22/0x25`), B moves nothing and C/G move the
+new slots (`0x2f/0x30`); the layout reads `[39,0,14,42,40,41,15,43]`;
+descriptors 14/15 read group 6 on the new slots with names in the mod; switching
+back to a stock TYPE restores `[39,0,0,42,40,41,0,43]` and the `Error`
+descriptors.
+
+**The value widget (1.0k).** A commandeered descriptor draws its *label* (the
+short name) but **no value box**: the page's parameter model rejects a slot past
+`0x2d` (all 46 sound slots are used), so the cell stays empty. The page-2 knob
+cells sit on a 26 px grid at x `33/59/85/111`, the top row centred at y 47 and
+the bottom row at y 21 (measured off the frame; the SRR dial is the col-4
+reference). `digifilter_draw` therefore paints its own round dial — a midpoint
+circle of radius 8 plus a needle whose angle is `(v-64)*200/127` through the
+`COS15` table — into the two empty C/G cells (centres x 85, top row y 41, bottom
+row y 15), matching SRR's look. This is drawn in `ev_draw`, so it needs no font
+and the stock labels are untouched.

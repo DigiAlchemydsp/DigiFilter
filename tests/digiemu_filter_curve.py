@@ -83,7 +83,8 @@ def force(u, ty):
         return -1
     u.mem_write(a0, struct.pack(">H", ty << 8))          # TYPE
     u.mem_write(a0 + 2, struct.pack(">H", 64 << 8))       # FREQ index 64
-    u.mem_write(a0 + 4, struct.pack(">H", 8 << 11))       # RESO index 8
+    u.mem_write(a0 + 4, struct.pack(">H", 8 << 11))       # RESO index 8 (BP/BP2)
+    u.mem_write(a0 + 0x2a, struct.pack(">H", 64 << 8))    # Feedback 0x2e (COMB/TRASH)
     return struct.unpack(">H", rd(u, a0, 2))[0] >> 8
 
 

@@ -49,13 +49,43 @@ typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour
 #define FS_TYPE 0x19
 #define FS_FREQ 0x1a
 #define FS_RESO 0x1b
+/* COMB/TRASH controls on the second page: spare sound slots (47/48), driven by
+ * two commandeered 'Error' descriptors (see page2_setup). They coexist with the
+ * stock Base/Width/Env Delay/SRR knobs, which are left untouched; the comb
+ * feedback is the RESO/GAIN knob (slot 0x1b). */
+#define FS_HARM 0x2f
+#define FS_DAMP 0x30
 
 /* the FLTR page kind. The page-kind list is at view+124 (vector), the index at
  * view+144; kind -> layout is 0x400657b2 (20 x 44 bytes at RAM 0x4197cf88),
  * whose +8.. are the 8 knob descriptor ids. The FLTR page's layout is
  * {ATK, DEC, SUS, REL, FREQ, RESO, TYPE, ENV} = ids {34,35,36,37,30,32,33,38}
- * = kind 6 (confirmed from the gui.snap RAM layout table). */
+ * = kind 6 (confirmed from the gui.snap RAM layout table). The second FLTR
+ * page (FLTR pressed again) is kind 7 = {EnvDelay, -, -, SRR, Base, Width, -,
+ * Routing} = ids {39,0,0,42,40,41,0,43}; the '-' entries are empty dotted boxes
+ * (descriptor id 0). */
 #define FLTR_KIND 6
+#define FLTR2_KIND 7
+
+/* kind -> layout: 20 entries of 44 bytes at RAM 0x4197cf88 (function
+ * 0x400657b2). Entry +8..+39 are the 8 encoder descriptor ids (32-bit). */
+#define LAYOUT_TABLE 0x4197CF88UL
+#define LAYOUT_STRIDE 44
+#define LAYOUT_PAGE2 (LAYOUT_TABLE + FLTR2_KIND * LAYOUT_STRIDE)
+#define LAYOUT_IDS ((volatile unsigned *)(LAYOUT_PAGE2 + 8))
+
+/* The parameter descriptor table (0x401a9d9c, 0x34 bytes each). Descriptors 0..16
+ * are unused 'Error' placeholders (group 0xffff); for COMB/TRASH we commandeer
+ * 13/14/15 as real filter descriptors for the new knobs and restore them after.
+ * Field offsets: +2 group, +6 slot, +14 range, +18 step, +0x30 short name. */
+#define DESC_TABLE 0x401A9D9CUL
+#define DESC_STRIDE 0x34
+#define DESC_NEW0 14
+#define DESC_NEW1 15
+#define DESC_TEMPLATE 42                 /* copy SRR's fields (it draws a dial), override the rest */
+
+static const char DF_L_HARM[] = "HARM";
+static const char DF_L_DAMP[] = "DAMP";
 
 enum { FM_BP, FM_BP2, FM_COMB, FM_TRASH, FM_NMODES };
 #define FM_FIRST_TYPE 8
@@ -235,19 +265,19 @@ static int comb_mag(int c, int g)
 #define TOOTH_Q (5 << 12)                      /* step at fi = 0, Q12 */
 #define comb_dstep(fi) (TOOTH_Q + (fi) * ((64 << 12) - TOOTH_Q) / 127)
 
-/* COMB: sharp, evenly spaced teeth (feedback from RESO). */
-static int comb_db2(int fi, int qi, int x)
+/* COMB: sharp, evenly spaced teeth (depth from the Feedback knob, 0..127). */
+static int comb_db2(int fi, int fb, int x)
 {
     int idx = ((x * comb_dstep(fi)) >> 12) & 255;
-    return comb_mag(COS15[idx], qi * 2000);
+    return comb_mag(COS15[idx], fb * 235);
 }
 
 /* TRASH: a denser comb (its own series) with a lower feedback, but the same
  * continuous sweep over FREQ. */
-static int trash_db2(int fi, int qi, int x)
+static int trash_db2(int fi, int fb, int x)
 {
     int idx = ((x * comb_dstep(fi) * 3 / 2) >> 12) & 255;
-    return comb_mag(COS15[idx], qi * 1100);
+    return comb_mag(COS15[idx], fb * 130);
 }
 
 static int col2step(int x)
@@ -266,7 +296,7 @@ static void build_curve(int mode, int fi, int qi)
     int x, pass;
     if (mode == FM_COMB || mode == FM_TRASH) {
         /* the teeth sit above the quiet floor; the floor is the comb's own
-         * minimum, so RESO raises the teeth from it (and clamps only at max). */
+         * minimum, so Feedback raises the teeth from it (clamps only at max). */
         int base = (mode == FM_COMB) ? 240 : 120;
         for (x = 0; x < 128; x++) {
             int v = (mode == FM_COMB) ? comb_db2(fi, qi, x)
@@ -347,10 +377,97 @@ static int read_track(int *type, int *fi, int *qi)
         return 0;
     *type = ty - FM_FIRST_TYPE;
     *fi = clampi((unsigned)FSLOT(kit, t, FS_FREQ) >> 8, 0, 127);
-    /* the DSP caps the resonance range at 13/15 (see filter.c); match it so the
-     * drawn curve shows the same resonance the audio gets. */
-    *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 11, 0, 15) * 13 / 15;
+    /* COMB/TRASH: the feedback is the RESO/GAIN knob (slot 0x1b), 0..127.
+     * BP/BP2: the DSP caps RESO at 13/15 (see filter.c) — match it so the
+     * drawn curve shows the resonance the audio gets. */
+    if (*type == FM_COMB || *type == FM_TRASH)
+        *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 8, 0, 127);
+    else
+        *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 11, 0, 15) * 13 / 15;
     return 1;
+}
+
+/* the active track's TYPE, or -1 */
+static int active_type(void)
+{
+    unsigned char *kit = UI_KIT;
+    int t = ACTIVE_TRACK;
+    if (!kit || t < 0 || t > 7)
+        return -1;
+    return FSLOT(kit, t, FS_TYPE) >> 8;
+}
+
+/* Write a filter parameter descriptor into a spare ('Error') descriptor entry:
+ * copy the SRR descriptor's fields (so the knob draws the same round dial),
+ * then set group 6, the sound slot, range 0x7f00 (0..127), step 1 and our own
+ * short name. The generic knob path then draws and edits it like any stock
+ * filter knob. */
+static void df_desc(unsigned id, int slot, const char *name)
+{
+    volatile unsigned char *d = (volatile unsigned char *)(DESC_TABLE + id * DESC_STRIDE);
+    const volatile unsigned char *t = (const volatile unsigned char *)(DESC_TABLE + DESC_TEMPLATE * DESC_STRIDE);
+    int i;
+    for (i = 0; i < DESC_STRIDE; i++)
+        d[i] = t[i];
+    *(volatile unsigned short *)(d + 2) = 6;            /* group = Filter */
+    *(volatile unsigned short *)(d + 6) = (unsigned short)slot;
+    *(volatile unsigned short *)(d + 14) = 0x7f00;      /* range 0..127 */
+    *(volatile unsigned short *)(d + 18) = 0x0100;      /* step 1 */
+    *(volatile unsigned *)(d + 0x30) = (unsigned)name;  /* short name */
+}
+
+/* The second FLTR page (kind 7) for COMB/TRASH: add the comb's Harmonics and
+ * Damping controls on the free C/G encoders, leaving the stock Base/Width/Env
+ * Delay/SRR knobs exactly as they are (and the comb feedback is the RESO/GAIN
+ * knob on page 1). We commandeer two unused 'Error' descriptors (14/15) as
+ * filter descriptors on spare sound slots, put them in C/G and restore the
+ * stock layout/descriptors for every other TYPE. Called every UI tick (from
+ * filter.c's digifilter_tick) before the page is drawn and before encoders
+ * turn, so the stock input/display path does all the work.
+ *
+ * kind 7 stock = {39,0,0,42,40,41,0,43}; comb = {39,0,14,42,40,41,15,43}
+ * (encoders A..H; 0 = the empty dotted box). */
+static void page2_setup(void)
+{
+    static const unsigned stock[8] = { 39, 0, 0, 42, 40, 41, 0, 43 };
+    static const unsigned combm[8] = { 39, 0, 14, 42, 40, 41, 15, 43 };
+    static unsigned char orig[2][DESC_STRIDE];
+    static int init, last = -1;
+    int ty = active_type(), comb = ty == FM_FIRST_TYPE + FM_COMB ||
+                                    ty == FM_FIRST_TYPE + FM_TRASH;
+    const unsigned *m = comb ? combm : stock;
+    int i;
+    if (!init) {
+        init = 1;
+        for (i = 0; i < 2; i++) {
+            const volatile unsigned char *s = (const volatile unsigned char *)(DESC_TABLE + (DESC_NEW0 + i) * DESC_STRIDE);
+            int j;
+            for (j = 0; j < DESC_STRIDE; j++)
+                orig[i][j] = s[j];
+        }
+    }
+    if (comb != last) {                          /* only rewrite on a state change */
+        last = comb;
+        if (comb) {
+            df_desc(DESC_NEW0, FS_HARM, DF_L_HARM);
+            df_desc(DESC_NEW1, FS_DAMP, DF_L_DAMP);
+        } else {
+            for (i = 0; i < 2; i++) {
+                volatile unsigned char *d = (volatile unsigned char *)(DESC_TABLE + (DESC_NEW0 + i) * DESC_STRIDE);
+                int j;
+                for (j = 0; j < DESC_STRIDE; j++)
+                    d[j] = orig[i][j];
+            }
+        }
+    }
+    for (i = 0; i < 8; i++)
+        if (LAYOUT_IDS[i] != m[i])
+            LAYOUT_IDS[i] = m[i];
+}
+
+void digifilter_page2_sync(void)
+{
+    page2_setup();
 }
 
 /* the page kind the view is showing (digieq/digipoly read the vector + index) */
@@ -365,10 +482,11 @@ static int view_kind(void *view)
 
 /* The track-parameter page view in the controller's list (drawAll iterates the
  * list and calls each view's drawView, so the view is present whenever its page
- * is shown). Its kind is the currently shown page, so we look for the FLTR kind
+ * is shown). Its kind is the currently shown page, so we look for a FLTR kind
  * rather than assuming the view is the last one: other screens/overlays stay in
- * the list too. */
-static void *fltr_view(void *ctrl)
+ * the list too. Returns the view and sets *kind to FLTR_KIND (page 1) or
+ * FLTR2_KIND (page 2). */
+static void *page_view(void *ctrl, int *kind)
 {
     char *node, *sent;
     if (!ctrl)
@@ -376,10 +494,59 @@ static void *fltr_view(void *ctrl)
     sent = CTRL_SENTINEL(ctrl);
     for (node = CTRL_HEAD(ctrl); node && node != sent; node = NODE_NEXT(node)) {
         void *view = NODE_VIEW(node);
-        if (view && view_kind(view) == FLTR_KIND)
+        int k = view ? view_kind(view) : -1;
+        if (k == FLTR_KIND || k == FLTR2_KIND) {
+            if (kind)
+                *kind = k;
             return view;
+        }
     }
     return 0;
+}
+
+/* The comb controls' value (0..127) from the active track's spare slots. */
+static int comb_val(int slot)
+{
+    unsigned char *kit = UI_KIT;
+    int t = ACTIVE_TRACK;
+    if (!kit || t < 0 || t > 7)
+        return 0;
+    return clampi((unsigned)FSLOT(kit, t, slot) >> 8, 0, 127);
+}
+
+static void dial_px(void *bmp, int x, int y)
+{
+    FILLRECT(bmp, x, y, x, y, 1);
+}
+
+/* A stock-style round dial (like SRR's): a circle with a needle, in the empty
+ * cell the commandeered descriptors leave on the second FLTR page. The value
+ * 0..127 sweeps the needle from lower-left to lower-right through straight up. */
+#define DIAL_R 8
+static void draw_dial(void *bmp, int cx, int cy, int v)
+{
+    int x = DIAL_R, y = 0, e = 0;
+    while (x >= y) {
+        dial_px(bmp, cx + x, cy + y); dial_px(bmp, cx + y, cy + x);
+        dial_px(bmp, cx - y, cy + x); dial_px(bmp, cx - x, cy + y);
+        dial_px(bmp, cx - x, cy - y); dial_px(bmp, cx - y, cy - x);
+        dial_px(bmp, cx + y, cy - x); dial_px(bmp, cx + x, cy - y);
+        y++;
+        if (e <= 0)
+            e += 2 * y + 1;
+        if (e > 0) {
+            x--;
+            e -= 2 * x + 1;
+        }
+    }
+    {
+        int idx = (v - 64) * 200 / 127;
+        int dx = (COS15[(idx - 64) & 255] * DIAL_R) >> 15;
+        int dy = (COS15[idx & 255] * DIAL_R) >> 15;
+        int k;
+        for (k = 1; k <= DIAL_R; k++)
+            dial_px(bmp, cx + dx * k / DIAL_R, cy + dy * k / DIAL_R);
+    }
 }
 
 /* core's ev_draw handler: the frame (stock curve included) is already drawn, so
@@ -387,13 +554,23 @@ static void *fltr_view(void *ctrl)
  * (bmp, ctrl): ctrl is the view controller drawAll walks. */
 void digifilter_draw(void *bmp, void *ctrl)
 {
-    int mode, fi, qi, x;
-    if (!bmp || !fltr_view(ctrl))
+    int kind = -1, mode, fi, qi, x;
+    if (!bmp || !page_view(ctrl, &kind))
         return;
     if (!read_track(&mode, &fi, &qi))
         return;
-    /* The stock page also drew its response for this (to it, unknown) TYPE, so
-     * clear the graph interior before painting ours. */
+    if (kind == FLTR2_KIND) {
+        /* The commandeered descriptors draw the HARM/DAMP labels but no value
+         * widget (their slot is past the model's range), so paint a stock round
+         * dial in each of the two free cells. */
+        if (mode == FM_COMB || mode == FM_TRASH) {
+            draw_dial(bmp, 85, 41, comb_val(FS_HARM));
+            draw_dial(bmp, 85, 15, comb_val(FS_DAMP));
+        }
+        return;
+    }
+    /* Page 1: the stock page drew its response for this (to it, unknown) TYPE,
+     * so clear the graph interior before painting ours. */
     FILLRECT(bmp, GX0 + 1, GY0 + 1, GX1 - 1, GY1 - 1, 0);
     build_curve(mode, fi, qi);
     {
