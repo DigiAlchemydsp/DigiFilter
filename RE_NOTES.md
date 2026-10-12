@@ -34,8 +34,9 @@ Sound block = `kit + 0x20 + t*0xa2`, slot `s` word at `+0x14 + 2s`.
 ## 2. TYPE names — SOLVED [S][L]
 
 Formatter **`0x40065336`**: `value = arg2>>8`; 0..2 via table `0x4018d214`
-(`"OFF","LP","HP"`), else `"EQ:%d"` (`0x401c6a8a`) with `value-2`. Its
-`move.l #0x40065336,d0` immediate at **`0x401539b2`** = the rename site.
+(`"OFF","LP","HP"`), else `"EQ:%d"` (`0x401c6a8a`) with `value-2`. The
+formatter's address (`0x40065336`) is loaded by an immediate at **`0x401539b2`**
+= the rename site.
 Stock UI list: `OFF / LP / HP / EQ:1 … EQ:5` = 0..7.
 
 ## 3. Runtime settings and smoothing [S]
@@ -69,19 +70,17 @@ a3@0x10`, rejected if `> 11` at `0x4007990e`). Relevant to persistence (§8).
 
 ## 6. THE INTEGRATION POINT — per-voice filter call [S][L]
 
-The render's voice loop calls the stock per-voice filter through `a3`:
+The render's voice loop sets up four arguments and calls the stock per-voice
+filter through register `a3`:
 
-```
-0x400780a4  lea 0x40072844,%a3     ; a3 = the target (digihealth rewrites this)
-0x400780aa  movel d6,d0 ; lsll d2,d0 ; andl d4,d0
-0x400780b2  movel d0,-(sp)          ; arg3 = active mask bit
-0x400780b4  movel d2,d0 ; lsll #7,d0
-0x400780ba  addil #0x80001a18,d0    ; buffer = 0x80001a18 + v*0x80  <- our jsr site
-0x400780c0  movel d0,-(sp)          ; arg2 = buffer
-0x400780c2  movel d3,-(sp)          ; arg1 = params = 0x800027a4 + v*0x6a
-0x400780c4  jsr %a3@                ; arg4 (pushed first) = voice index
-0x400780c6  addi.l #106,%d3         ; next voice
-```
+- `0x400780a4` loads the stock filter target `0x40072844` into `a3`
+  (digihealth rewrites this).
+- `0x400780ba` computes the buffer pointer `0x80001a18 + v*0x80` — this is our
+  `jsr` site.
+- `0x400780c4` is the call itself; the pushed arguments are (voice index first)
+  the voice index, the params record `0x800027a4 + v*0x6a`, the buffer
+  `0x80001a18 + v*0x80`, and the active-mask bit. After the call the voice index
+  advances by 106.
 
 Function `0x40072844(params, buffer, active, voice)`:
 
@@ -92,10 +91,11 @@ Function `0x40072844(params, buffer, active, voice)`:
 | active | 0/1 | mask bit; the stock function ignores it |
 | voice | 0..7 | voice == track for the checked tracks |
 
-**Hook (1.0h).** digihealth 1.0 rewrites the `lea` at `0x400780a4` (its
+**Hook (1.0h).** digihealth 1.0 rewrites the target-load at `0x400780a4` (its
 profiling wrapper), so we must not touch it. We instead hook the free
-instruction just before the call, **`0x400780ba`** (`addil #0x80001a18,%d0`,
-`jsr` site; outside the FAST-AUDIO copied block) to `digifilter_dispatch`
+instruction just before the call, **`0x400780ba`** (the `jsr` site; that
+instruction computes the buffer pointer; outside the FAST-AUDIO copied block) to
+`digifilter_dispatch`
 (filter_glue.s). It does the displaced `add`, then per voice points `a3` at
 `digifilter_filt` for `params[0]` in 8..11 and restores the original `a3` (the
 digihealth wrapper, or the stock function) otherwise. `digifilter_filt`
@@ -131,18 +131,8 @@ BP/BP2 ~2800, COMB/TRASH ~1750.
 
 ## 7. The stock TYPE clamp (why the UI range alone is not enough) [L]
 
-The raw TYPE byte is read each block at PC `0x40072fc8` and clamped:
-
-```
-0x40072fc8  mvsb %a0@,%d0      ; a0 = params+0x44 (TYPE)
-0x40072fca  bges 0x40072fd0
-0x40072fcc  clrl %d0
-0x40072fce  bras 0x40072fd8
-0x40072fd0  moveq #7,%d1       ; <-- max
-0x40072fd2  cmpl %d0,%d1
-0x40072fd4  bges 0x40072fd8
-0x40072fd6  moveq #7,%d0
-```
+The raw TYPE byte is read each block at PC `0x40072fc8` (from `params+0x44`)
+and clamped to the range 0..7 — the "max 7" constant lives at `0x40072fd0`.
 
 The clamped value is stored to `0x8000f1e4 + v*4` with flag `0x8000f1dc + v`.
 So the widened UI range is silently clamped to 7 in the stock DSP. **Do not ship
@@ -158,9 +148,9 @@ deserializer `0x4007a236` copies them word-for-word (`movew` from the blob). So
 slot 0x19 (TYPE) round-trips verbatim; there is no clamp in the load path. The
 only clamps touching TYPE are elsewhere and do not affect the stored value:
 
-- `0x40072fd0` (`moveq #7`) clamps the value only for the **stock DSP's** mode
-  selection, and it writes a *separate* array (`0x8000f1e4+v*4`), not the kit;
-  our hook reads the unclamped `params[0]`.
+- `0x40072fd0` (the `max 7` constant) clamps the value only for the **stock
+  DSP's** mode selection, and it writes a *separate* array (`0x8000f1e4+v*4`),
+  not the kit; our hook reads the unclamped `params[0]`.
 - the preset deserializer `0x400797d8` clamps one field at **11** (`0x4007990e`)
   — ≥ our maximum.
 

@@ -53,3 +53,5 @@ second FLTR page drives COMB/TRASH delay/harmonics/damping/feedback trim.
 The package contains the mod's own bytes only; no Elektron firmware. See
 [../LICENSE](../LICENSE). Rebuild with `elekloader.sdk.build` from the sources
 under `../` (see [../README.md](../README.md)).
+
+Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1).

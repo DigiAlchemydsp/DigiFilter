@@ -36,7 +36,7 @@ from unicorn.m68k_const import UC_M68K_REG_A3, UC_M68K_REG_A7  # noqa: E402
 import emu.gui as G  # noqa: E402
 
 SNAP = [os.path.join(dp, f) for dp, _, fs in os.walk(FW + "/snapshots") for f in fs if f == "gui.snap"][0]
-CALL = 0x400780C4      # jsr %a3@  (a3 = 0x40072844 from 0x400780a4)
+CALL = 0x400780C4      # per-voice filter call (target loaded at 0x400780a4)
 FREQ = 0x80001F18
 state = {"n": 0, "shown": 0, "log": [], "tag": "idle", "capture": True, "hits": 0,
          "max": {}, "samples": {}, "out": 0}

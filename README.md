@@ -38,6 +38,8 @@ band-pass bell for BP/BP2, comb teeth for COMB, a trash can for TRASH). The DSP
 is **budgeted at or below the stock filter's cost** per voice per block. See
 [RE_NOTES.md](RE_NOTES.md).
 
+Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1).
+
 Everything in this repo builds (`BUILT`), lints against `core` and combines with
 `digihealth` (`OK: the mods combine`).
 

@@ -42,7 +42,7 @@ from unicorn.m68k_const import (  # noqa: E402
 import emu.gui as G  # noqa: E402
 
 SNAP = [os.path.join(dp, f) for dp, _, fs in os.walk(FW + "/snapshots") for f in fs if f == "gui.snap"][0]
-LOOP1 = 0x40075EC6     # movel %a2@+,%d6   (sample read)
+LOOP1 = 0x40075EC6     # sample-read loop
 LOOP2 = 0x400761DE     # coefficient loop
 state = {"n": 0, "uc": None, "shown": 0, "log": [], "tag": "idle", "capture": True}
 
