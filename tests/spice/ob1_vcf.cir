@@ -1,0 +1,57 @@
+* OB-1 VCF (synth board sheet 1342, sheet 1 bottom row), as read in
+* https://github.com/simonjohansson/DigiFilter/issues/2.
+* CA3080: output current = Iabc * tanh((V+ - V-) / 2 VT) into its 300 pF; followers ideal (offsets ignored).
+* Stages alternate: 1 and 3 non-inverting, 2 and 4 inverting, each through 100K / 220 ohm dividers.
+* U28: stage 4 into its - input through 33K / 220 ohm, + grounded; its output (12K to ground) feeds the
+* input node through 4.7K and 6.8 uF. The input node is 100 ohm (R142) to ground; one VCO at ON drives it
+* through the mixer's 47K. Iabc: each stage's bias (44 uA: -3 dB at 430 Hz); Ir: U28's (the resonance);
+* Amp: the source's peak for the transient runs (5 V assumed for one VCO: not on the schematic).
+
+.param VT=0.02585 Iabc=44u Ir=0.5m Amp=5
+.param k2=2*VT
+
+Vsrc src 0 DC 0 AC 1 SIN(0 {Amp} 200)
+Rmix src nin 47k
+R142 nin 0 100
+
+* stage 1 (U24), non-inverting
+B1 0 c1 I = {Iabc} * tanh((V(nin) - V(m1)) / {k2})
+C17 c1 0 300p
+E1 y1 0 c1 0 1
+R15x y1 m1 100k
+R143 m1 0 220
+
+* stage 2 (U25), inverting
+B2 0 c2 I = {Iabc} * tanh((0 - V(m2)) / {k2})
+C18 c2 0 300p
+E2 y2 0 c2 0 1
+R160 y1 m2 100k
+R168 y2 m2 100k
+R162 m2 0 220
+
+* stage 3 (U26), non-inverting
+R172 y2 p3 100k
+R175 p3 0 220
+B3 0 c3 I = {Iabc} * tanh((V(p3) - V(m3)) / {k2})
+C19 c3 0 300p
+E3 y3 0 c3 0 1
+R177 y3 m3 100k
+R174 m3 0 220
+
+* stage 4 (U27), inverting
+B4 0 c4 I = {Iabc} * tanh((0 - V(m4)) / {k2})
+C20 c4 0 300p
+E4 y4 0 c4 0 1
+R181 y3 m4 100k
+R186 y4 m4 100k
+R182 m4 0 220
+
+* resonance (U28)
+R189 y4 m5 33k
+R191 m5 0 220
+B5 0 o5 I = {Ir} * tanh((0 - V(m5)) / {k2})
+R193 o5 0 12k
+R192 o5 f5 4.7k
+C21 f5 nin 6.8u
+
+.end

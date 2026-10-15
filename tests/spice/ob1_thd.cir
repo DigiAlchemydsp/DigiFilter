@@ -1,0 +1,19 @@
+* The OB-1 VCF's distortion against input level, with and without resonance, ngspice:
+*     cd tests/spice && ngspice -b ob1_thd.cir
+* A 200 Hz sine into the mixer's 47K (one VCO at ON); THD at the 4-pole output: clean without resonance;
+* with it, U28's resonance OTA saturates (https://github.com/simonjohansson/DigiFilter/issues/2).
+.include ob1_vcf.cir
+.options reltol=1e-5
+.control
+foreach amp 1.25 2.5 5 10 20
+ foreach ir 0 0.8m
+  alterparam Amp = $amp
+  alterparam Ir = $ir
+  reset
+  tran 2u 60m 40m 2u
+  echo "input $amp V peak, U28 $ir A:"
+  fourier 200 y4
+ end
+end
+quit
+.endc
