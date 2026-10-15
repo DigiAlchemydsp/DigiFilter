@@ -17,7 +17,7 @@ digifilter_typefmt:
         asr.l   #8, %d0
         cmpi.l  #8, %d0
         blt.s   .Lstock
-        cmpi.l  #12, %d0
+        cmpi.l  #14, %d0                | 8..11 ours, 12..13 the OB-1 modes
         bge.s   .Lstock
         subq.l  #8, %d0
         lsl.l   #3, %d0                 | 8-byte strides
@@ -41,6 +41,10 @@ nf_names:
         .asciz  "COMB"
         .balign 8
         .asciz  "TRASH"
+        .balign 8
+        .asciz  "OB4"
+        .balign 8
+        .asciz  "OB2"
         .balign 8
 
 | The per-voice filter call dispatcher.
@@ -71,7 +75,7 @@ digifilter_dispatch:
         move.b  (%a1), %d1
         cmpi.b  #8, %d1
         blt.s   .Ldisp_stock
-        cmpi.b  #12, %d1
+        cmpi.b  #14, %d1                        | 8..11 ours, 12..13 the OB-1 modes
         bge.s   .Ldisp_stock
         lea     digifilter_filt, %a3            | our TYPE: run our filter (filter.c)
         bra.s   .Ldisp_out
