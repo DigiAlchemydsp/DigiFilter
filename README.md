@@ -4,7 +4,7 @@ Extra per-track filter modes for the Elektron
 Digitakt mk1 (OS 1.53).
 
 A format-2 [elekloader](https://github.com/irpina/elekloader) mod, id
-`digifilter`. It adds four filter types on top of the stock `OFF / LP / HP /
+`digifilter`. It adds six filter types on top of the stock `OFF / LP / HP /
 EQ:1..5`:
 
 | TYPE | mode | what it is |
@@ -13,6 +13,8 @@ EQ:1..5`:
 | 9 | **BP2** | a wider band pass (about half the resonance) |
 | 10 | **COMB** | feedback comb, delay from FREQ, feedback from RESO |
 | 11 | **TRASH** | second comb at half the delay (a higher harmonic series) |
+| 12 | **OB4** | the Oberheim OB-1's 4-pole lowpass ladder, self-oscillating at the top of RESO |
+| 13 | **OB2** | the OB-1's 2-pole output: 12 dB/oct, resonating from the same 4-pole loop |
 
 Each mode runs per track and uses that track's own FREQ, RESO and filter
 envelope, exactly like the stock types. Stock TYPE values keep running the
@@ -25,6 +27,14 @@ The screenshot shows the page for every type, top to bottom — LP (stock), BP,
 BP2, COMB and TRASH:
 
 ![The FLTR page for LP, BP, BP2, COMB and TRASH](docs/img/fltr-types.png)
+
+**OB4** and **OB2** are modelled on the OB-1's VCF: a ladder of four OTA stages
+with the resonance fed back from the fourth, saturating where the circuit does.
+The FLTR page draws their lowpass response; top to bottom, LP (stock), OB4 and
+OB2. How they were made and checked (SPICE, a model, the fixed-point kernel,
+digiemu, a unit) is in [docs/ob1.md](docs/ob1.md).
+
+![The FLTR page for LP, OB4 and OB2](docs/img/ob1-fltr.png)
 
 > Digitakt **mk1 only**. Digitakt II's filter machines are out of scope.
 
@@ -58,6 +68,8 @@ Everything in this repo builds (`BUILT`), lints against `core` and combines with
   for a metallic, near-self-oscillating ring); the
   **filter envelope (H + ADSR)** modulates the cutoff exactly as the stock types
   do.
+- For **OB4/OB2**, **RESO / GAIN (F)** is the resonance: it self-oscillates from
+  about 121, so the filter rings at FREQ even with no input.
 - **Second FLTR page**, while TYPE is COMB or TRASH, adds **C = Harmonics**
   (delay divider 1–4) and **G = Damping** (a one-pole on the feedback), each
   shown as a round dial like the stock SRR knob. They sit **alongside** the
@@ -73,13 +85,13 @@ Everything in this repo builds (`BUILT`), lints against `core` and combines with
 Three patch sites plus `ev_draw` / `ev_tick` subscriptions (addresses and the
 full reverse-engineering are in [RE_NOTES.md](RE_NOTES.md)):
 
-1. widen the Filter Type range field from max 7 to max 11;
-2. re-point the TYPE label formatter so 8–11 print `BP / BP2 / COMB / TRASH`;
+1. widen the Filter Type range field from max 7 to max 13;
+2. re-point the TYPE label formatter so 8–13 print `BP / BP2 / COMB / TRASH / OB4 / OB2`;
 3. hook the per-voice filter call in the render and run our own DSP for TYPE
-   8–11, tail-calling the stock filter for everything else;
+   8–13, tail-calling the stock filter for everything else;
 4. subscribe to core's `ev_draw` (`digifilter_draw`, order 40): after the page
    has drawn, when the shown page kind is FLTR (6) and the active track's TYPE
-   is 8–11, mask the stock graph and TYPE box and paint the BP/BP2/COMB/TRASH
+   is 8–13, mask the stock graph and TYPE box and paint the BP/BP2/COMB/TRASH/OB4/OB2
    response curve plus the mode's small TYPE-box glyph.
    (This composes with the event chain; patching the page drawView vtable entry
    `0x401842a0` directly lost the curve in multi-mod builds.)
@@ -138,6 +150,7 @@ third site is chosen so this mod does **not** overlap digihealth 1.0.
 | `filter_glue.s` | the raw site entry points (labels + the per-voice dispatcher) |
 | `filter_ui.c` | the `ev_draw` handler (`digifilter_draw`: response curve, TYPE glyph, page-2 dials) and the page-2 `ev_tick` re-map (`digifilter_page2_sync`) |
 | `filter_tables.h` | `g`, `k`, frequency and comb-delay tables |
+| `ob1_vcf.c`, `ob1_vcf.h`, `ob1_tables.h` | OB4/OB2: the OB-1 ladder and its tables; its model, checks, SPICE circuit and digiemu tests are `tests/ob1_*`, `tests/spice/` and `tests/digiemu_filter_ob1_*` ([docs/ob1.md](docs/ob1.md)) |
 | `tests/filter_model.py` | floating-point reference (`svf_block`, `comb_gain`) |
 | `tests/digiemu_filter_*.py` | headless digiemu traces/tests (need a digiemu checkout) |
 | `tools/disas.py` | disassembly helper (`m68k-elf-objdump -m m68k:cfv4e`) |
