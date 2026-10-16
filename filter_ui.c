@@ -10,8 +10,8 @@
  *
  * The handler walks the view controller's view list (the same list drawAll
  * iterates), takes the top view, and when its page kind is the FLTR kind (6)
- * and the active track's TYPE is one of ours, paints the BP/BP2 band-pass bell
- * or the COMB/TRASH comb teeth over the graph area.
+ * and the active track's TYPE is one of ours, paints the BP/BP2 band-pass bell,
+ * the COMB/TRASH comb teeth, or the OB4/OB2 ladder's lowpass over the graph area.
  *
  * The curve is the same shape the DSP makes (filter_tables.h): BP/BP2 a
  * state-variable band pass at FREQ with RESO, COMB/TRASH the harmonic peaks of a
@@ -89,6 +89,10 @@ static const char DF_L_DAMP[] = "DAMP";
 
 enum { FM_BP, FM_BP2, FM_COMB, FM_TRASH, FM_NMODES };
 #define FM_FIRST_TYPE 8
+/* the OB-1 modes (filter.c, docs/ob1.md): TYPE 12, 13; here modes FM_NMODES and FM_NMODES + 1 */
+#define FM_OB4 FM_NMODES
+#define FM_OB2 (FM_NMODES + 1)
+#include "ob1_tables.h"
 
 /* Graph box: the FLTR page's FREQ/RES response area (screen 128 x 64, firmware
  * bitmap row 0 = the bottom). Measured off the stock page: the box is x 20..71,
@@ -106,6 +110,7 @@ enum { FM_BP, FM_BP2, FM_COMB, FM_TRASH, FM_NMODES };
 #define TBY1 22
 
 static int32 curve[128];                 /* raw response per frequency step */
+static int curve_lowpass;                /* OB4/OB2: no taper on the left, a lowpass runs flat to the edge */
 
 static int clampi(int v, int lo, int hi)
 {
@@ -291,9 +296,30 @@ static int col2step(int x)
  * track's mode. The displayed depth scales with FREQ/RESO directly, so turning a
  * knob moves the curve instead of the normaliser flattening it; it clamps only
  * at the extreme ends. */
+/* OB4/OB2: the ladder's response from OB1_CURVE (half-dB by FREQ steps from the cutoff), between the two
+ * rows around RESO (0, 16, .. 112, then 127), drawn from -36 dB (the floor) to +18 dB, so RESO 0's passband
+ * sits at 2/3 height and a resonant peak rises above it. */
+#define OB_FLOOR2 (-72)
+#define OB_SPAN2  108
+static void ob_curve(int mode, int fi, int qi)
+{
+    const signed char (*c)[129] = OB1_CURVE[mode == FM_OB2];
+    int lvl = qi >> 4, span = lvl < 7 ? 16 : 15, frac = qi - 16 * lvl, x;   /* row lvl + 1: 16 steps up, 127 from 112 */
+    for (x = 0; x < 128; x++) {
+        int d = clampi(x - fi + 64, 0, 128);
+        int v = c[lvl][d] + (c[lvl + 1][d] - c[lvl][d]) * frac / span;
+        curve[x] = CH * clampi(v - OB_FLOOR2, 0, OB_SPAN2) / OB_SPAN2;
+    }
+}
+
 static void build_curve(int mode, int fi, int qi)
 {
     int x, pass;
+    curve_lowpass = mode >= FM_OB4;
+    if (mode >= FM_OB4) {
+        ob_curve(mode, fi, qi);
+        return;
+    }
     if (mode == FM_COMB || mode == FM_TRASH) {
         /* the teeth sit above the quiet floor; the floor is the comb's own
          * minimum, so Feedback raises the teeth from it (clamps only at max). */
@@ -329,7 +355,7 @@ static void build_curve(int mode, int fi, int qi)
  * edges so the curve never ends in a vertical "brickwall". */
 static int curve_y(int s, int v)
 {
-    int w = (s < 8) ? s : (s > 119) ? (127 - s) : 8;
+    int w = (s < 8 && !curve_lowpass) ? s : (s > 119) ? (127 - s) : 8;
     return GY0 + 2 + v * w / 8;
 }
 
@@ -349,6 +375,15 @@ static void type_glyph(void *bmp, int mode)
         FILLRECT(bmp, cx - 1, TBY1 - 2, cx + 1, TBY1 - 2, 1);/* lid handle */
         FILLRECT(bmp, cx - 2, bb + 1, cx - 2, TBY1 - 5, 1);  /* ribs */
         FILLRECT(bmp, cx + 2, bb + 1, cx + 2, TBY1 - 5, 1);
+        return;
+    }
+    if (mode >= FM_OB4) {                                   /* a lowpass with a resonant bump */
+        int knee = cx + 1, fall = (mode == FM_OB4) ? 3 : 1;
+        for (x = TBX0 + 1; x < TBX1; x++) {
+            int v = x < knee - 2 ? h * 2 / 3 : x <= knee ? h : h * 2 / 3 - (x - knee) * fall * h / 12;
+            if (v > 0)
+                FILLRECT(bmp, x, TBY0 + 1, x, TBY0 + 1 + v, 1);
+        }
         return;
     }
     for (x = TBX0 + 1; x < TBX1; x++) {
@@ -373,14 +408,14 @@ static int read_track(int *type, int *fi, int *qi)
     if (!kit || t < 0 || t > 7)
         return 0;
     ty = FSLOT(kit, t, FS_TYPE) >> 8;      /* the slot word is the value << 8 */
-    if (ty < FM_FIRST_TYPE || ty >= FM_FIRST_TYPE + FM_NMODES)
+    if (ty < FM_FIRST_TYPE || ty > FM_FIRST_TYPE + FM_OB2)
         return 0;
     *type = ty - FM_FIRST_TYPE;
     *fi = clampi((unsigned)FSLOT(kit, t, FS_FREQ) >> 8, 0, 127);
     /* COMB/TRASH: the feedback is the RESO/GAIN knob (slot 0x1b), 0..127.
      * BP/BP2: the DSP caps RESO at 13/15 (see filter.c) — match it so the
      * drawn curve shows the resonance the audio gets. */
-    if (*type == FM_COMB || *type == FM_TRASH)
+    if (*type == FM_COMB || *type == FM_TRASH || *type >= FM_OB4)
         *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 8, 0, 127);
     else
         *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 11, 0, 15) * 13 / 15;

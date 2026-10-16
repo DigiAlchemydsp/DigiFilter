@@ -1,0 +1,18 @@
+* The OB-1 VCF's small-signal responses against U28's bias (the loop gain k), ngspice:
+*     cd tests/spice && ngspice -b ob1_ac.cir
+* Prints, per U28 bias: the 4-pole and 2-pole outputs' peaks and their level at 20 Hz (the passband,
+* 1 / (1 + k)). k ~ 4.15 per mA, self-oscillation from ~0.96 mA (https://github.com/simonjohansson/DigiFilter/issues/2).
+.include ob1_vcf.cir
+.control
+foreach ir 0 0.2m 0.4m 0.6m 0.8m 0.9m
+  alterparam Ir = $ir
+  reset
+  ac dec 200 10 100k
+  meas ac pk4 max vdb(y4)
+  meas ac lo4 find vdb(y4) at=20
+  meas ac pk2 max vdb(y2)
+  meas ac lo2 find vdb(y2) at=20
+  echo "U28 $ir A: OB4 peak $&pk4 dB, 20 Hz $&lo4 dB; OB2 peak $&pk2 dB, 20 Hz $&lo2 dB"
+end
+quit
+.endc

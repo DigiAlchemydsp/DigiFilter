@@ -25,6 +25,7 @@ typedef int int32;
 typedef unsigned int uint32;
 
 #include "filter_tables.h"
+#include "ob1_vcf.h"
 
 /* ---- firmware (OS 1.53) ---- */
 #define UI_KIT (*(unsigned char *volatile *)0x4199dc44)  /* the kit of the pattern being edited */
@@ -64,6 +65,10 @@ static const char *const FM_NAME[FM_NMODES] = { "BP", "BP2", "COMB", "TRASH" };
  * 0x40079a60 must not clamp the value away. */
 #define FM_STOCK_TYPES 8
 #define FM_FIRST_TYPE  FM_STOCK_TYPES
+/* The OB-1 modes (ob1_vcf.c, docs/ob1.md) after ours: TYPE 12 OB4, 13 OB2. Kept out of FM_NMODES, so the SVF and
+ * comb code never sees them. */
+#define OB_FIRST_TYPE  (FM_FIRST_TYPE + FM_NMODES)
+#define OB_NTYPES      2
 
 /* ---- the coefficient set the DSP reads (filter_dsp.s) ---- */
 struct fcoef { int32 a1, a2, a3, c0, c1, c2; };
@@ -364,6 +369,19 @@ static int cutoff_index(unsigned char *params, int v)
     return clampi(base >> 8, 0, 127);
 }
 
+/* cutoff_index() without the rounding: 8.8, 0..127 << 8, for the OB-1 modes' fractional cutoff */
+static int cutoff_index8(unsigned char *params, int v)
+{
+    int base = (int)(unsigned)PARAM_CUTOFF(params);       /* index<<8 */
+    int depth = ((int)(unsigned)PARAM_ENV(params) - 0x4000) << 17;
+    if (depth) {
+        int32 env = ENV_LEVEL(v);
+        int32 envmod = mulsh((int32)(0u - (uint32)env), depth, 31);  /* (-env)*depth>>31 */
+        base += envmod >> 16;                             /* to FREQ-word units */
+    }
+    return clampi(base, 0, 127 << 8);
+}
+
 static void svf_run(int m, int fi, int qi, int32 *buf, int v)
 {
     int fi0 = svf_have[v] ? svf_fi[v] : fi;
@@ -403,7 +421,18 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
     (void)active;
     if (voice >= 0 && voice < 8) {
         int type = params[0];
-        int m = type - FM_FIRST_TYPE;
+        int m = type - FM_FIRST_TYPE, ob = type - OB_FIRST_TYPE;
+        if (ob >= 0 && ob < OB_NTYPES) {
+            /* OB4/OB2: the same cutoff (FREQ + the filter envelope) and RESO (0..127) as the combs read */
+            if (prev_filt_type[voice] != type) {
+                if (prev_filt_type[voice] < OB_FIRST_TYPE)          /* from BP..TRASH, or the first time */
+                    ob1_vcf_reset(voice);
+                prev_filt_type[voice] = type;
+            }
+            ob1_vcf_run(ob ? OB1_TAP2 : OB1_TAP4, cutoff_index8(params, voice),
+                        clampi((int)(unsigned)SET_RESO(voice) >> 8, 0, 127), buf, voice);
+            return 1;
+        }
         if (m >= 0 && m < FM_NMODES) {
             /* CUTOFF: params@2 (index<<8) plus the params@6 filter-envelope
              * modulation (cutoff_index), RESO: the engine's slot 0x1b — the
