@@ -325,8 +325,45 @@ eight-voice hardware timing.
 Full SDK builds and Core 4.0 patch/link checks passed for OS 1.53 and 1.54, with no
 unresolved imports. GCC 16 requires temporarily passing `-Wno-error=int-conversion`
 for an existing UI pointer-to-integer diagnostic; the source and build configuration
-for that unrelated diagnostic are unchanged. Complete firmware boot, live UI,
-sequencer locks/slides and physical listening remain untested for this change.
+for that unrelated diagnostic are unchanged.
+
+### Complete firmware checks (2026-10-16)
+
+Source commit `0ecbc40`, Core 4.0 + DigiFilter, version display `STEP`:
+
+| Check | OS 1.53 | OS 1.54 |
+|---|---|---|
+| SDK packet/content checksums, framing and in-place depack | Pass | Pass |
+| Bootstrap execution, strict cold boot and timed UI/playback tour | Pass | Pass |
+| Timed tour: minimum estimated render margin | 37.66% | 37.49% |
+| Stock tour: minimum estimated render margin | 37.82% | 37.66% |
+| Eight OB4 voices, RESO 127, full-scale input, moving cutoff | 28.46% margin | 28.28% margin |
+| Real encoder selection, cutoff endpoints and intermediate held bases | Pass | Pass |
+| Real UI-to-audio fixture, OB2 at FREQ 80 / RESO 64 | 0.1% model error | 0.1% model error |
+| OB4/OB2 response curves and Sound copy/paste | Pass | Pass |
+| Both TYPEs saved to separate cards, cold rebuilt and reloaded | Pass | Pass |
+
+The full `emu.fwcheck` runs used freshly booted images and stock baselines, DDR
+aliasing, strict mode, timing and the firmware's own float/drawing instructions.
+There were no new strict violations or missed audio deadlines. Both builds retain
+the stock boot's single read from address zero, marked `in_stock`. All 13 named
+screens match stock. Frame publication times differ; the audio comparison flags
+only the final 100 ms window, with zero reported RMS difference and recordings
+about 1 ms different in length.
+
+The tour's large encoder bursts do not reliably select OB2. Separate, spaced panel
+turns verified TYPE 13 and both FREQ endpoints against the held DAC-model targets.
+The eight-voice timing fixture explicitly forces TYPE 12, RESO 127, full-scale saw
+input and swept raw FREQ at the dispatcher: 449 blocks per voice over 300 ms.
+Those timing results are cycle estimates at 250 MHz with zero-wait memory, not
+physical-device measurements. Functional UI checks use the emulator's normal host
+shortcuts and idle skipping, with the DDR model and OS-specific kit/track addresses.
+
+Local reports, input scripts, screenshots and fixture runners are under
+`work/firmware-check/`, including `os1.53/report.json`, `os1.54/report.json` and
+`SUMMARY.md`. The SDK separately verifies the checksums that this public copy of
+digiemu omits. Physical flashing/listening, sequencer lock/slide UI validation,
+and original OB-1 settling/absolute calibration measurements remain untested.
 
 Before #12 can supply an implementation-ready quantizer:
 
