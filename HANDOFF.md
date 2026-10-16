@@ -7,6 +7,10 @@ curve and TYPE glyph were done in sessions 1–2 (1.0h–1.0i). This session is
 
 Version is **1.0k**, **uncommitted** (HEAD is `a415ed1`, the 1.0j release).
 
+> **Later:** the 1.1a performance pass (the SVF coefficient cache and the
+> dual-accumulator sample loop) is in [HANDOFF-OPTIMIZATION.md](HANDOFF-OPTIMIZATION.md)
+> and `RE_NOTES.md` §13.
+
 ---
 
 ## 0. Environment (all present on this machine)

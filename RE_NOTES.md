@@ -127,7 +127,8 @@ a stock TYPE is **byte-identical** to the stock firmware; modulation is smooth
 block cutoff sweep); extremes (fi 0/127) stable.
 
 **Cost [L]:** instructions per voice per render block — stock TYPE 1 ~2400,
-BP/BP2 ~2800, COMB/TRASH ~1750.
+BP/BP2 ~1200 static / ~2400 swept (1.1a: cached coefficients), COMB/TRASH
+~1730, OB4/OB2 ~3000. See §13.
 
 ## 7. The stock TYPE clamp (why the UI range alone is not enough) [L]
 
@@ -407,3 +408,79 @@ circle of radius 8 plus a needle whose angle is `(v-64)*200/127` through the
 `COS15` table — into the two empty C/G cells (centres x 85, top row y 41, bottom
 row y 15), matching SRR's look. This is drawn in `ev_draw`, so it needs no font
 and the stock labels are untouched.
+
+---
+
+## 13. Optimization pass (1.1a)
+
+The per-voice DSP is dominated by two costs: the SVF sample loop and the SVF
+coefficient build (`mode_coef`, whose `div55` is a 32-step software division).
+Both were attacked; the extra modes' output is **bit-for-bit identical** to 1.1
+(checked by running the whole `digifilter_filt` path, baseline vs optimized,
+over a sequence of blocks that steps FREQ/RESO and switches modes, and comparing
+the 32-frame buffers and the filter state).
+
+**Coefficient cache + fused block call** (`filter.c:svf_run`). The coefficients
+were recomputed twice per block per voice (start and end indices) and fed to
+four 8-frame `digifilter_svf` calls, each with its own register save/restore and
+EMAC save/restore. The last block's set is now cached (`svf_c[v]`); when the
+cutoff/resonance indices are unchanged (static knobs) the block runs **one**
+`digifilter_svf` call for all 32 frames with **no** `mode_coef`; when they move,
+one new set is built and ramped across the four sub-blocks (the linear ramp is
+unchanged, so the result is identical). `mode_coef` also writes `c1 = k`
+directly — `mulsh(k, ONE27, 27) == k` exactly for `k >= 0`.
+
+**Dual-accumulator sample loop** (`filter_dsp.s`). The two multiplies that make
+`v1` and the two that make `v2` are independent; they now accumulate in `ACC0`
+and `ACC1` and interleave, so the `movclr.l` reads do not stall behind a serial
+pair (the eMAC method of DSPLIBUM §2.2.1.6). This is a pipeline/cycle effect, not
+an instruction-count one.
+
+**Measured cost** (`tests/df_bench.py`, Unicorn, SDK flags — instruction count
+per voice per 32-frame block, median; the bench is the regression guard):
+
+| mode | 1.1 | 1.1a static | 1.1a swept |
+|---|---|---|---|
+| BP (8) | 3113 | **1229** | **2424** |
+| BP2 (9) | 3125 | **1229** | **2429** |
+| COMB (10) | 1726 | 1727 | 1727 |
+| TRASH (11) | 1726 | 1727 | 1727 |
+
+So BP/BP2 with static knobs are now **cheaper than the stock filter** (~2400),
+and while the cutoff is swept (envelope/LFO) they cost ~22 % less than 1.1. The
+comb and OB-1 paths are untouched.
+
+**Not done (considered):** `div55` cannot be replaced by one hardware divide —
+the MCF54418's `DIVU.L` takes a 32-bit dividend (the 68020-style 64-bit
+`Dr:Dq` form is not a ColdFire instruction; the assembler rejects it). It now
+runs only when the cutoff index changes, so it is off the static path entirely;
+a reciprocal table or a Newton–Raphson reciprocal were left as unnecessary for
+the one-per-moving-block frequency.
+
+---
+
+## 14. OS 1.54 [S]
+
+The mod also builds for **Digitakt mk1 OS 1.54** (main sha256 `5c58bf9e…`,
+`.syx` sha256 `f78ba80f…`, main_len 2479680). 1.54 moved the main OS by a few
+hundred bytes, so the addresses the mod names moved with it; the porter
+(`tools/port_os.py` from the Tone+FX Digitakt port) mapped them and rewrote the
+sources as per-OS macros (`mod.json` `"ports": {"1.54": …}`).
+
+| what | 1.53 | 1.54 |
+|---|---|---|
+| UI kit | `0x4199dc44` | `0x4199ec44` |
+| per-voice env level | `0x4199df58` | `0x4199ef58` |
+| active track | `0x4197b6b4` | `0x4197c6b4` |
+| page kind→layout table | `0x4197cf88` | `0x4197df88` |
+| parameter descriptor table | `0x401a9d9c` | `0x401aa09c` |
+| fill-rect | `0x400c19a6` | `0x400c1bce` |
+| TYPE range field (site) | `0x401aa45c` | `0x401aa75c` |
+| TYPE name ptr (site) | `0x401539b2` | `0x40153bda` |
+| per-voice filter call (site) | `0x400780ba` | `0x400780ba` (unmoved) |
+
+Stable across both: the stock per-voice filter `0x40072844`, the formatter
+`0x40065336`, and all SRAM operands (`0x80001502` engine, `0x80001f18` freq).
+Validated live in digiemu: the audio DSP gives the same peaks as 1.53 (BP 1.3 %,
+BP2 0.0 %, COMB 0.1 % vs the model) and the second FLTR page maps all eight
+encoders and the restored layout correctly. See HANDOFF-OPTIMIZATION.md §8.
