@@ -23,7 +23,8 @@ digifilter_svf:
         move.l  %d0, 68(%sp)
         move.l  #0x20, %macsr                   | signed, fractional, truncating, no saturation
         moveq   #0, %d0
-        move.l  %d0, %acc0                      | start from an empty accumulator
+        move.l  %d0, %acc0                      | start from empty accumulators
+        move.l  %d0, %acc1
         move.l  %d0, %accext01
 
         movea.l 80(%sp), %a0                    | buf
@@ -45,12 +46,15 @@ digifilter_svf:
 .Ls:    move.l  (%a0), %d0                      | v0
         move.l  %d0, %d1
         sub.l   %d5, %d1                        | v3 = v0 - ic2
-        mac.l   %a2, %d4, %acc0                 | a1*ic1
-        mac.l   %a3, %d1, %acc0                 | a2*v3
+        | v1 and v2 are independent: give each its own accumulator so the
+        | eMAC's two MAC chains interleave (DSPLIBUM 2.2.1.6) and the movclr
+        | below does not stall behind a serial pair.
+        mac.l   %a2, %d4, %acc0                 | v1 += a1*ic1
+        mac.l   %a3, %d4, %acc1                 | v2 += a2*ic1
+        mac.l   %a3, %d1, %acc0                 | v1 += a2*v3
+        mac.l   %a4, %d1, %acc1                 | v2 += a3*v3
         movclr.l %acc0, %d2                     | v1
-        mac.l   %a3, %d4, %acc0                 | a2*ic1
-        mac.l   %a4, %d1, %acc0                 | a3*v3
-        movclr.l %acc0, %d3
+        movclr.l %acc1, %d3
         add.l   %d5, %d3                        | v2 = ic2 + ...
         move.l  %d2, %d1
         add.l   %d1, %d1

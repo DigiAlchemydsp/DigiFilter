@@ -4,6 +4,62 @@ All notable changes to DigiFilter. Format-2
 [elekloader](https://github.com/irpina/elekloader) mod for the Elektron
 Digitakt **mk1, OS 1.53**. Versioned as `<major>.<minor><letter>`.
 
+## [1.1a] - 2026-10-16
+
+Performance pass on the per-voice DSP. The extra modes sound bit-for-bit
+identical to 1.1; only the cost changed.
+
+### Performance
+
+- **BP / BP2** (the state-variable filter): the coefficients are now cached and
+  recomputed only when the cutoff/resonance indices actually move, and with
+  static knobs the SVF runs one `digifilter_svf` call for the whole 32-frame
+  block instead of four 8-frame calls. Instructions per voice per render block:
+  **3113 → 1229** static (-60 %), **3113 → 2424** while the cutoff is swept
+  (-22 %). The coefficients are bit-identical, so the audio is too.
+- The SVF sample loop keeps the `v1` and `v2` MAC chains in separate eMAC
+  accumulators (ACC0/ACC1), so the two multiplies per sample interleave instead
+  of serialising (DSPLIBUM §2.2.1.6).
+- `mode_coef` writes `c1` directly (`c1 = k`, exact) instead of a 32×32 `mulsh`.
+
+### Internals
+
+- New `tests/df_bench.py` (+ `tests/df_bench.c`) counts the per-voice
+  instructions per block for every mode in Unicorn, so the cost is tracked.
+- **OS 1.54.** `mod.json` gains a `"ports": {"1.54": …}` block (the moved
+  firmware addresses and the site bytes) and the sources name each moved address
+  through a per-OS `F_…`/`.LF_…` macro, so the same tree builds for OS 1.53 and
+  1.54 (elekloader 0.5+). The 1.53 build is byte-for-byte unchanged.
+
+### Verified
+
+- Tested on hardware (Digitakt mk1), OS 1.53 and OS 1.54: **PASS**.
+
+## [1.1] - 2026-10-16
+
+The OB-1's filter as two more types (contributed by Simon Johansson, PR #2).
+
+### Added
+
+- **OB4 (TYPE 12)**: the Oberheim OB-1's 4-pole lowpass ladder — four CA3080
+  OTA stages with the resonance fed back from the fourth, saturating where the
+  circuit does (U28). RESO self-oscillates from about 121, so it rings at FREQ
+  with no input.
+- **OB2 (TYPE 13)**: the OB-1's 2-pole output — stage 2 tapped while the
+  resonance loop stays closed from stage 4, so it resonates and self-oscillates
+  like OB4 but rolls off at 12 dB/oct.
+- Both use the track's FREQ, RESO and filter envelope as the other modes do, and
+  the FLTR page draws their lowpass response plus a TYPE-box glyph.
+- New source `ob1_vcf.c`/`.h` (the fixed-point kernel) and `ob1_tables.h`, with
+  `tests/ob1_*`, `tests/spice/` and `tests/digiemu_filter_ob1_*.py`; how they
+  were made and checked is in [docs/ob1.md](docs/ob1.md).
+
+### Changed
+
+- Widens the Filter Type range field from max 11 to max 13 and renames TYPE
+  11–13 (`BP / BP2 / COMB / TRASH / OB4 / OB2`) in `mod.json`,
+  `filter_glue.s`, `filter.c` and `filter_ui.c`.
+
 ## [1.0k] - 2026-10-05
 
 The second FLTR page gets its own COMB/TRASH controls, alongside the stock ones.

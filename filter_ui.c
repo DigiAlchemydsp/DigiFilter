@@ -18,6 +18,23 @@
  * comb at FREQ. It is drawn in the same graph box the stock page uses so it
  * reads as the same UI.
  */
+
+/* ---- firmware addresses that moved in OS 1.54 (tools/port_os.py, tools/os154.json) ---- */
+#ifdef OS154
+#define F_400c19a6 0x400c1bce
+#define F_401a9d9c 0x401aa09c
+#define F_4197b6b4 0x4197c6b4
+#define F_4197cf88 0x4197df88
+#define F_4199dc44 0x4199ec44
+#else
+#define F_400c19a6 0x400c19a6
+#define F_401a9d9c 0x401a9d9c
+#define F_4197b6b4 0x4197b6b4
+#define F_4197cf88 0x4197cf88
+#define F_4199dc44 0x4199dc44
+#endif
+/* ---- end of the moved addresses ---- */
+
 typedef int int32;
 typedef unsigned int uint32;
 
@@ -25,7 +42,7 @@ typedef unsigned int uint32;
 
 /* the firmware's drawing primitives (OS 1.53) */
 typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour);
-#define FILLRECT ((fillrect_t)0x400c19a6)    /* colour 0 clear, 1 set, -1 invert */
+#define FILLRECT ((fillrect_t)F_400c19a6)    /* colour 0 clear, 1 set, -1 invert */
 /* The page kind: the view's kind vector is at +124, its end at +128 and the
  * shown index at +144; kind = vector[index] (as digieq/digipoly read it). */
 #define VIEW_KINDS(view) (*(int32 **)((char *)(view) + 124))
@@ -43,8 +60,8 @@ typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour
 
 /* the active track and the pattern's kit (RE_NOTES): kit + 0x20 + t*0xa2 is the
  * track's sound block, slot s a word at +0x14 + 2s. */
-#define UI_KIT (*(unsigned char *volatile *)0x4199dc44)
-#define ACTIVE_TRACK (*(int *volatile *)0x4197b6b4)
+#define UI_KIT (*(unsigned char *volatile *)F_4199dc44)
+#define ACTIVE_TRACK (*(int *volatile *)F_4197b6b4)
 #define FSLOT(kit, t, s) ((int)(*(unsigned short *)((kit) + 0x20 + (t) * 0xa2 + 0x14 + 2 * (s))))
 #define FS_TYPE 0x19
 #define FS_FREQ 0x1a
@@ -69,7 +86,7 @@ typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour
 
 /* kind -> layout: 20 entries of 44 bytes at RAM 0x4197cf88 (function
  * 0x400657b2). Entry +8..+39 are the 8 encoder descriptor ids (32-bit). */
-#define LAYOUT_TABLE 0x4197CF88UL
+#define LAYOUT_TABLE ((unsigned)F_4197cf88)
 #define LAYOUT_STRIDE 44
 #define LAYOUT_PAGE2 (LAYOUT_TABLE + FLTR2_KIND * LAYOUT_STRIDE)
 #define LAYOUT_IDS ((volatile unsigned *)(LAYOUT_PAGE2 + 8))
@@ -78,7 +95,7 @@ typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour
  * are unused 'Error' placeholders (group 0xffff); for COMB/TRASH we commandeer
  * 13/14/15 as real filter descriptors for the new knobs and restore them after.
  * Field offsets: +2 group, +6 slot, +14 range, +18 step, +0x30 short name. */
-#define DESC_TABLE 0x401A9D9CUL
+#define DESC_TABLE ((unsigned)F_401a9d9c)
 #define DESC_STRIDE 0x34
 #define DESC_NEW0 14
 #define DESC_NEW1 15

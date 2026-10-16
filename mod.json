@@ -1,11 +1,11 @@
 {
  "id": "digifilter",
- "version": "1.0k",
+ "version": "1.1a",
  "title": "Digi Filter",
  "category": "Sound",
  "author": "Digital Alchemy DSP",
  "license": "GPL-2.0-or-later",
-  "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ, RESO and filter envelope: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs), and OB4/OB2 (the Oberheim OB-1's ladder, its 4-pole output and its 2-pole one: docs/ob1.md). Widens the Filter Type range to 13 and renames the new values, runs the extra DSP at the per-voice filter call (site 0x400780ba -> digifilter_dispatch), and overpaints the FLTR page's FREQ/RES response curve for the new modes from a core ev_draw handler (digifilter_draw: BP/BP2 a band-pass bell, COMB/TRASH comb teeth) when the page kind is 6. Stock TYPE values tail-call the stock filter and keep the stock curve. While COMB/TRASH is selected the RESO/GAIN knob is the comb feedback (0..127) and the second FLTR page's free C/G encoders add Harmonics/Damping controls (labelled HARM/DAMP), alongside the stock Base/Width/Env Delay/SRR knobs which keep working. See README.md.",
+ "description": "Adds per-track filter modes to the Digitakt mk1 on top of the stock LP/HP/EQ, using each track's own FREQ, RESO and filter envelope: BP (band pass), BP2 (a wider band pass), COMB and TRASH (two combs), and OB4/OB2 (the Oberheim OB-1's ladder, its 4-pole output and its 2-pole one: docs/ob1.md). Widens the Filter Type range to 13 and renames the new values, runs the extra DSP at the per-voice filter call (site 0x400780ba -> digifilter_dispatch), and overpaints the FLTR page's FREQ/RES response curve for the new modes from a core ev_draw handler (digifilter_draw: BP/BP2 a band-pass bell, COMB/TRASH comb teeth) when the page kind is 6. Stock TYPE values tail-call the stock filter and keep the stock curve. While COMB/TRASH is selected the RESO/GAIN knob is the comb feedback (0..127) and the second FLTR page's free C/G encoders add Harmonics/Damping controls (labelled HARM/DAMP), alongside the stock Base/Width/Env Delay/SRR knobs which keep working. See README.md.",
  "device": "digitakt-mk1",
  "os": "1.53",
  "sources": [
@@ -16,13 +16,37 @@
   "filter_ui.c"
  ],
  "sites": [
-  {"addr": "0x401aa45c", "stock": "00000700", "op": "bytes", "new": "00000d00", "kind": "data"},
-  {"addr": "0x401539b2", "stock": "40065336", "op": "ptr", "target": "digifilter_typefmt"},
-  {"addr": "0x400780ba", "stock": "068080001a18", "op": "jsr", "target": "digifilter_dispatch"}
+  {
+   "addr": "0x401aa45c",
+   "stock": "00000700",
+   "op": "bytes",
+   "new": "00000d00",
+   "kind": "data"
+  },
+  {
+   "addr": "0x401539b2",
+   "stock": "40065336",
+   "op": "ptr",
+   "target": "digifilter_typefmt"
+  },
+  {
+   "addr": "0x400780ba",
+   "stock": "068080001a18",
+   "op": "jsr",
+   "target": "digifilter_dispatch"
+  }
  ],
  "subscribe": [
-  {"event": "ev_tick", "fn": "digifilter_tick", "order": 50},
-  {"event": "ev_draw", "fn": "digifilter_draw", "order": 40}
+  {
+   "event": "ev_tick",
+   "fn": "digifilter_tick",
+   "order": 50
+  },
+  {
+   "event": "ev_draw",
+   "fn": "digifilter_draw",
+   "order": 40
+  }
  ],
  "requires": [
   "core"
@@ -31,5 +55,36 @@
   "names": [
    "sound:filter TYPE values (Digi Filter modes)"
   ]
+ },
+ "ports": {
+  "1.54": {
+   "sites": [
+    {
+     "addr": "0x401aa75c",
+     "stock": "00000700",
+     "op": "bytes",
+     "new": "00000d00",
+     "kind": "data"
+    },
+    {
+     "addr": "0x40153bda",
+     "stock": "40065336",
+     "op": "ptr",
+     "target": "digifilter_typefmt"
+    },
+    {
+     "addr": "0x400780ba",
+     "stock": "068080001a18",
+     "op": "jsr",
+     "target": "digifilter_dispatch"
+    }
+   ],
+   "defsym": {
+    "OS154": 1
+   },
+   "cflags": [
+    "-DOS154"
+   ]
+  }
  }
 }
