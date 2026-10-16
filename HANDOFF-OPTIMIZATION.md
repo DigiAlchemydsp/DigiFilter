@@ -5,9 +5,23 @@ bit-for-bit identical to 1.1** — only the machine cost changed. This is the
 companion to `HANDOFF.md` (session 3, the 1.0k feature work) and the ledger is
 also recorded in `RE_NOTES.md` §13 and `CHANGELOG.md`.
 
-Version is **1.1a**, uncommitted (HEAD is `159e231`, the OB-1 merge / 1.1). It is
-built on top of the (also uncommitted) 1.1 release-prep edits (`mod.json`,
-`README.md`, `CHANGELOG.md`, `releases/README.md`).
+Version is **1.1a**. **Status: shipped** — merged to `master`, pushed, and
+published as [GitHub release `v1.1a`](https://github.com/DigiAlchemydsp/DigiFilter/releases/tag/v1.1a)
+(its package carries **both OS elemods**). Tested on hardware (Digitakt mk1),
+OS 1.53 and OS 1.54: **PASS**. It also folds in 1.1 (the OB-1 modes), which was
+not released separately.
+
+Where it landed (`master`):
+
+| commit | |
+|---|---|
+| `499b3a5` | the optimization + OS 1.54 port (code, tests, docs) |
+| `72ba614`, `c24944b` | the 1.1a release package (+ the hardware-test rebuild) |
+| `af2c765` | merge into `master` |
+| `bfd5451` | fold in the 1.1 package (OS 1.53) |
+| `c5f3733` | README Releases + Credits sections |
+| `8543712` | rebuild the package with the credits/releases docs |
+| tag `v1.1a` | the published release |
 
 ---
 
@@ -97,6 +111,7 @@ instruction-count one (the loop length is unchanged; the prologue gains one
 - `tests/filter_model.py` → OK. `tests/ob1_model.py` → OK (OB-1 untouched).
 - Build + `elekloader.lint` against core 2.1 → `OK: links …`, `imports nothing`.
 - `elekloader.patch` with core + digifilter → `OK: the mods combine`.
+- **Hardware** (Digitakt mk1): OS 1.53 and OS 1.54 → **PASS**.
 
 ---
 
@@ -161,7 +176,11 @@ tests above were run against.
 | `filter_dsp.s` | `ACC0`/`ACC1` interleaved MAC loop; clear `%acc1` in the prologue |
 | `filter_ui.c` | per-OS address macros (the port) |
 | `tests/df_bench.py`, `tests/df_bench.c` | new per-voice cost bench |
-| `CHANGELOG.md`, `README.md`, `RE_NOTES.md` | 1.1a entries / updated cost figures |
+| `CHANGELOG.md` | 1.1a entry (+ the hardware-test note) |
+| `README.md` | cost/build figures; `## Releases` and `## Credits` sections |
+| `RE_NOTES.md` | §13 optimization, §14 OS 1.54 |
+| `releases/README.md` | the 1.1a + 1.1 packages, hardware test, Credits |
+| `releases/` | `DigiFilter-1.1a.zip` (both OS elemods), `digifilter-1.1a*.elemod`, folded-in 1.1 |
 | `mod.json` | version `1.1` → `1.1a`; `"ports": {"1.54": …}` |
 
 ---
@@ -202,10 +221,19 @@ addresses to run against a 1.54 image).
 
 ### Artifacts
 
+Committed (in `releases/`, published as the GitHub release `v1.1a`):
+
 | file | what |
 |---|---|
-| `out/digifilter-1.1a.elemod` | the OS 1.53 mod |
-| `out/digifilter-1.1a-1.53-test.syx` | OS 1.53 + core 2.1 + digifilter 1.1a, ready to flash/test |
-| `out/digifilter-1.1a-os1.54.elemod` | the OS 1.54 mod |
-| `out/digifilter-1.1a-os1.54-test.syx` | OS 1.54 + core 4.0 + digifilter 1.1a, ready to flash/test |
+| `releases/elemods/digifilter-1.1a.elemod` | OS 1.53 mod |
+| `releases/elemods/digifilter-1.1a-os1.54.elemod` | OS 1.54 mod |
+| `releases/DigiFilter-1.1a.zip` | package: both elemods + sources + docs + README |
+| `releases/elemods/digifilter-1.1.elemod`, `releases/DigiFilter-1.1.zip` | the 1.1 package (also folded in) |
+
+Local, ready to flash (gitignored `out/`):
+
+| file | what |
+|---|---|
+| `out/digifilter-1.1a-1.53-test.syx` | OS 1.53 + core 2.1 + digifilter 1.1a |
+| `out/digifilter-1.1a-os1.54-test.syx` | OS 1.54 + core 4.0 + digifilter 1.1a |
 

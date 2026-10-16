@@ -2,6 +2,9 @@
 
 Prebuilt DigiFilter for the **Digitakt mk1, OS 1.53 and OS 1.54**.
 
+Published releases: [GitHub Releases](https://github.com/DigiAlchemydsp/DigiFilter/releases)
+(`v1.1a` is current / Latest).
+
 | file | |
 |---|---|
 | `elemods/digifilter-1.1a.elemod` | the mod, **OS 1.53** (current) |

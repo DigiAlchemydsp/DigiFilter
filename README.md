@@ -192,8 +192,9 @@ python tests/digiemu_filter_page2.py --digiemu <checkout> --fw <folder>
 
 ## Releases
 
-Prebuilt packages live in [`releases/`](releases/README.md). The current one,
-**`DigiFilter-1.1a.zip`**, carries **both OS builds** —
+Prebuilt packages live in [`releases/`](releases/README.md) and on the
+[GitHub Releases page](https://github.com/DigiAlchemydsp/DigiFilter/releases).
+The current one, **`DigiFilter-1.1a.zip`**, carries **both OS builds** —
 `elemods/digifilter-1.1a.elemod` for **OS 1.53** and
 `elemods/digifilter-1.1a-os1.54.elemod` for **OS 1.54** — plus the sources,
 docs and the install/build README. `releases/elemods/` also keeps the older
