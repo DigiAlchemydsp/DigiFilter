@@ -73,3 +73,10 @@ under `../` (see [../README.md](../README.md)).
 
 Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1). **1.1a** was
 tested on hardware (Digitakt mk1) on both **OS 1.53** and **OS 1.54**: PASS.
+
+## Credits
+
+- **Digital Alchemy DSP** — the band-pass **BP / BP2**, **COMB**, **TRASH** modes
+  and the per-voice DSP / FLTR-page response curve.
+- **Simon Johansson** (PR #2) — the **OB4 / OB2** Oberheim OB-1 ladder modes
+  ([../docs/ob1.md](../docs/ob1.md)).

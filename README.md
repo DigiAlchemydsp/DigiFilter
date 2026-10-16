@@ -190,6 +190,24 @@ python tests/digiemu_filter_curve.py --digiemu <checkout> --fw <folder>
 python tests/digiemu_filter_page2.py --digiemu <checkout> --fw <folder>
 ```
 
+## Releases
+
+Prebuilt packages live in [`releases/`](releases/README.md). The current one,
+**`DigiFilter-1.1a.zip`**, carries **both OS builds** —
+`elemods/digifilter-1.1a.elemod` for **OS 1.53** and
+`elemods/digifilter-1.1a-os1.54.elemod` for **OS 1.54** — plus the sources,
+docs and the install/build README. `releases/elemods/` also keeps the older
+elemods (1.1, 1.0k, 1.0j, 1.0i, 1.0h).
+
+## Credits
+
+- **Digital Alchemy DSP** — the mod: the band-pass **BP / BP2** (state-variable),
+  **COMB** and **TRASH** modes, the per-voice DSP and the FLTR-page response
+  curve.
+- **Simon Johansson** (PR #2) — the **OB4** and **OB2** modes: the Oberheim
+  OB-1's VCF as a zero-delay-feedback ladder and its 2-pole output, from his
+  SPICE study of the circuit (see [docs/ob1.md](docs/ob1.md)).
+
 ## Licence
 
 GPL-2.0-or-later. No Elektron firmware is included or committed.
