@@ -37,10 +37,10 @@
 #define GY0 7
 #define GY1 23
 /* TYPE cell outer (15px, centre 86,15) + glyph interior */
-#define TBX0 78
-#define TBX1 92
-#define TBY0 8
-#define TBY1 22
+#define TBX0 77
+#define TBX1 93
+#define TBY0 7
+#define TBY1 23
 
 #define K_FUNC 1
 #define K_PTN 4
@@ -91,43 +91,48 @@ static int32_t clampi_ui(int32_t v, int32_t lo, int32_t hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
-/* ---- TYPE glyphs (DT icons, DN outer 79..93/8..22 centre 86,15) ---- */
+/* ---- TYPE glyphs: user-supplied 17x17 bitmaps (SVG sources live outside
+ * the repo in DigiFilter-ICONS/). Row 0 = bottom (screen y7).
+ * Bit x = column x (screen 77+x). Art covers 77..93/7..23. */
+static const unsigned BP_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x10FE1, 0x10FE1, 0x10FE1, 0x10FE1, 0x10FE1, 0x107C1, 0x107C1, 0x107C1, 0x107C1, 0x10381, 0x10381, 0x10381, 0x10101, 0x0FFFE,
+};
+static const unsigned BP2_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x13FF9, 0x13FF9, 0x13FF9, 0x11FF1, 0x11FF1, 0x10FE1, 0x10FE1, 0x107C1, 0x10381, 0x10101, 0x0FFFE,
+};
+static const unsigned COMB_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x0FFFE,
+};
+static const unsigned TRASH_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x13FF9, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12009, 0x17FFD, 0x10381, 0x10001, 0x10001, 0x0FFFE,
+};
+static const unsigned OB4_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x10FFD, 0x10FFD, 0x10FFD, 0x107FD, 0x107FD, 0x107FD, 0x103FD, 0x103FD, 0x103FD, 0x10381, 0x10381, 0x10381, 0x10381, 0x10381, 0x0FFFE,
+};
+static const unsigned OB2_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x13FFD, 0x11FFD, 0x10FFD, 0x107FD, 0x103FD, 0x10381, 0x10381, 0x10381, 0x10381, 0x10381, 0x0FFFE,
+};
+/* ---- TYPE glyphs (17x17 bitmaps, 77..93/7..23) ---- */
 static void type_glyph(void *bmp, int32_t mode)
 {
-    int32_t x, cx = (TBX0 + TBX1) / 2, h = TBY1 - (TBY0 + 1);
+    const unsigned *g;
+    int32_t r;
+    if (mode == FM_BP) g = BP_GLYPH;
+    else if (mode == FM_BP2) g = BP2_GLYPH;
+    else if (mode == FM_COMB) g = COMB_GLYPH;
+    else if (mode == FM_TRASH) g = TRASH_GLYPH;
+    else if (mode == FM_OB4) g = OB4_GLYPH;
+    else g = OB2_GLYPH;
     fw_fillrect(bmp, TBX0, TBY0, TBX1, TBY1, 0);
-    if (mode == FM_TRASH) {
-        int32_t b0 = TBX0 + 2, b1 = TBX1 - 2, bb = TBY0 + 1;
-        fw_fillrect(bmp, b0, bb, b1, bb, 1);
-        fw_fillrect(bmp, b0, bb, b0, TBY1 - 3, 1);
-        fw_fillrect(bmp, b1, bb, b1, TBY1 - 3, 1);
-        fw_fillrect(bmp, b0 - 1, TBY1 - 3, b1 + 1, TBY1 - 3, 1);
-        fw_fillrect(bmp, cx - 1, TBY1 - 2, cx + 1, TBY1 - 2, 1);
-        fw_fillrect(bmp, cx - 2, bb + 1, cx - 2, TBY1 - 5, 1);
-        fw_fillrect(bmp, cx + 2, bb + 1, cx + 2, TBY1 - 5, 1);
-        return;
-    }
-    if (mode == FM_OB4 || mode == FM_OB2) {
-        int32_t knee = cx + 1, fall = (mode == FM_OB4) ? 3 : 1;
-        for (x = TBX0 + 1; x < TBX1; x++) {
-            int32_t v = x < knee - 2 ? h * 2 / 3 : x <= knee ? h : h * 2 / 3 - (x - knee) * fall * h / 12;
-            if (v > 0)
-                fw_fillrect(bmp, x, TBY0 + 1, x, TBY0 + 1 + v, 1);
-        }
-        return;
-    }
-    for (x = TBX0 + 1; x < TBX1; x++) {
-        int32_t v;
-        if (mode == FM_COMB) {
-            v = ((x - TBX0) % 3 == 1) ? h : h / 3;
-        } else {
-            int32_t half = (mode == FM_BP2) ? 7 : 4, dx = x - cx;
-            v = (dx * dx >= half * half) ? 0
-              : h * (half * half - dx * dx) / (half * half);
-        }
-        fw_fillrect(bmp, x, TBY0 + 1, x, TBY0 + 1 + v, 1);
+    for (r = 0; r < 17; r++) {
+        unsigned rowbits = g[r];
+        int32_t xx;
+        for (xx = 0; xx < 17; xx++)
+            if (rowbits & (1u << xx))
+                fw_fillrect(bmp, TBX0 + xx, TBY0 + r, TBX0 + xx, TBY0 + r, 1);
     }
 }
+
 
 /* ---- FREQ/RESO curve (DT build_curve, DN wide cell 25..67) ---- */
 static int32_t curve[128];
