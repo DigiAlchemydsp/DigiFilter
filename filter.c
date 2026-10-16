@@ -26,9 +26,11 @@
 #ifdef OS154
 #define F_4199dc44 0x4199ec44
 #define F_4199df58 0x4199ef58
+#define F_421f3e50 0x421f4e50
 #else
 #define F_4199dc44 0x4199dc44
 #define F_4199df58 0x4199df58
+#define F_421f3e50 0x421f3e50
 #endif
 /* ---- end of the moved addresses ---- */
 
@@ -37,6 +39,7 @@ typedef unsigned int uint32;
 
 #include "filter_tables.h"
 #include "ob1_vcf.h"
+#include "ob1_control.h"
 
 /* ---- firmware (OS 1.53) ---- */
 #define UI_KIT (*(unsigned char *volatile *)F_4199dc44)  /* the kit of the pattern being edited */
@@ -254,8 +257,10 @@ static void df_persist(void)
 #define ENGINE(v) (0x80001502 + 106 * (v))
 #define PARAM_CUTOFF(params) (*(volatile unsigned short *)((params) + 2))
 #define PARAM_ENV(params) (*(volatile unsigned short *)((params) + 6))
+#define SET_FREQ(v) (*(volatile unsigned short *)(ENGINE(v) + 2 * FS_FREQ))
 #define SET_RESO(v) (*(volatile unsigned short *)(ENGINE(v) + 2 * FS_RESO))
 #define ENV_LEVEL(v) (*(volatile int *)(F_4199df58 + 12 * (v)))
+#define LFO_TARGET(v, l) ((volatile int *)(F_421f3e50 + 80 * (v) - 40 * (l)))
 
 /* Every sound slot is a word in the render record; slot s is at
  * params + 2s - 0x32 (TYPE s=0x19 is at +0; FREQ 0x1a at +2; ...; the second
@@ -381,11 +386,20 @@ static int cutoff_index(unsigned char *params, int v)
     return clampi(base >> 8, 0, 127);
 }
 
-/* cutoff_index() without the rounding: 8.8, 0..127 << 8, for the OB-1 modes' fractional cutoff */
+/* The dispatcher marks .fresh on stock types, which bypass digifilter_filt(). */
+struct ob1_control digifilter_ob_control[8] = {[0 ... 7] = {.fresh = 1}};
+
+/* Hold the programmable base; the two engine LFO contributions and envelope remain continuous. */
 static int cutoff_index8(unsigned char *params, int v)
 {
-    int base = (int)(unsigned)PARAM_CUTOFF(params);       /* index<<8 */
+    int base = ob1_control_run(&digifilter_ob_control[v], (int)(unsigned)SET_FREQ(v));
+    int l;
     int depth = ((int)(unsigned)PARAM_ENV(params) - 0x4000) << 17;
+    for (l = 0; l < 2; l++) {
+        volatile int *lfo = LFO_TARGET(v, l);
+        if (lfo[0] == FS_FREQ)
+            base += lfo[1];
+    }
     if (depth) {
         int32 env = ENV_LEVEL(v);
         int32 envmod = mulsh((int32)(0u - (uint32)env), depth, 31);  /* (-env)*depth>>31 */
@@ -457,16 +471,14 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
         int type = params[0];
         int m = type - FM_FIRST_TYPE, ob = type - OB_FIRST_TYPE;
         if (ob >= 0 && ob < OB_NTYPES) {
-            /* OB4/OB2: the same cutoff (FREQ + the filter envelope) and RESO (0..127) as the combs read */
-            if (prev_filt_type[voice] != type) {
-                if (prev_filt_type[voice] < OB_FIRST_TYPE)          /* from BP..TRASH, or the first time */
-                    ob1_vcf_reset(voice);
-                prev_filt_type[voice] = type;
-            }
+            if (digifilter_ob_control[voice].fresh)
+                ob1_vcf_reset(voice);
+            prev_filt_type[voice] = type;
             ob1_vcf_run(ob ? OB1_TAP2 : OB1_TAP4, cutoff_index8(params, voice),
                         clampi((int)(unsigned)SET_RESO(voice) >> 8, 0, 127), buf, voice);
             return 1;
         }
+        digifilter_ob_control[voice].fresh = 1;
         if (m >= 0 && m < FM_NMODES) {
             /* CUTOFF: params@2 (index<<8) plus the params@6 filter-envelope
              * modulation (cutoff_index), RESO: the engine's slot 0x1b — the

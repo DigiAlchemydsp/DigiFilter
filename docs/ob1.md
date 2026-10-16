@@ -6,6 +6,11 @@ from stage 4, so OB2 resonates and self-oscillates like OB4 but rolls off at 12 
 track's FREQ, RESO and filter envelope as the other types do. This page is how they were made and checked;
 the README has how to use them.
 
+FREQ now selects 64 nominal semitone-spaced base settings, held at about 64.69 Hz.
+The envelope and LFO remain continuous. The base range is approximately 51.5 Hz–1.96 kHz,
+with the existing 327 Hz midpoint retained as a calibration reference. This changes
+existing OB4/OB2 sounds; see [the programmer and cutoff model](ob1-programmer.md).
+
 ## The circuit
 
 From the OB-1's synth board schematic (sheet 1342; the full reading:
@@ -49,6 +54,11 @@ from digiemu.
 ![The FLTR page for the stock LP, OB4 and OB2 at FREQ 64, RESO 64](img/ob1-fltr.png)
 
 ## Results
+
+These are the original 1.1a results. FREQ values in the model/kernel checks are indices
+on the stock frequency curve, before the new encoder mapping. The stepping control's
+current checks are described in [the control model](ob1-programmer.md#numerical-check-and-remaining-work);
+the full UI and physical-hardware checks below have not been repeated for stepping.
 
 | | |
 |---|---|

@@ -38,6 +38,7 @@
 typedef int int32;
 typedef unsigned int uint32;
 
+#include "ob1_control.h"
 #include "filter_tables.h"
 
 /* the firmware's drawing primitives (OS 1.53) */
@@ -322,6 +323,7 @@ static void ob_curve(int mode, int fi, int qi)
 {
     const signed char (*c)[129] = OB1_CURVE[mode == FM_OB2];
     int lvl = qi >> 4, span = lvl < 7 ? 16 : 15, frac = qi - 16 * lvl, x;   /* row lvl + 1: 16 steps up, 127 from 112 */
+    fi = (ob1_knob_cutoff8(fi << 8) + 128) >> 8;
     for (x = 0; x < 128; x++) {
         int d = clampi(x - fi + 64, 0, 128);
         int v = c[lvl][d] + (c[lvl + 1][d] - c[lvl][d]) * frac / span;

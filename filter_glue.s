@@ -80,6 +80,14 @@ digifilter_dispatch:
         lea     digifilter_filt, %a3            | our TYPE: run our filter (filter.c)
         bra.s   .Ldisp_out
 .Ldisp_stock:
+        move.l  %d0, %d1
+        sub.l   #0x80001a18, %d1                | buffer -> voice*0x80
+        lsr.l   #7, %d1
+        mulu.w  #12, %d1                       | struct ob1_control: phase, cutoff8, fresh
+        lea     digifilter_ob_control, %a1
+        adda.l  %d1, %a1
+        moveq   #1, %d1
+        move.l  %d1, 8(%a1)                    | re-enter OB with a fresh control and filter state
         move.l  digifilter_disp_orig:l, %a3     | stock TYPE: the original target
 .Ldisp_out:
         move.l  (%sp)+, %a1

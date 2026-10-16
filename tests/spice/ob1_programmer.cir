@@ -1,0 +1,61 @@
+OB-1 programmer DC networks, 1341 and 1342/3
+* Algebraic fixture: VR=10 V and T17=500 ohms, not measured calibration.
+* Both networks receive the same test word; this does not model serial data polarity.
+* Ideal drivers and op-amps; comparator, clocks and sample/hold are excluded.
+.param vr=10 trim=500
+Vword word 0 0
+Vplus plus 0 15
+Vminus minus 0 -15
+B1 d1 0 V={vr*(floor(v(word))-2*floor(v(word)/2))}
+B2 d2 0 V={vr*(floor(v(word)/2)-2*floor(v(word)/4))}
+B3 d3 0 V={vr*(floor(v(word)/4)-2*floor(v(word)/8))}
+B4 d4 0 V={vr*(floor(v(word)/8)-2*floor(v(word)/16))}
+B5 d5 0 V={vr*(floor(v(word)/16)-2*floor(v(word)/32))}
+B6 d6 0 V={vr*floor(v(word)/32)}
+
+* 1341 ramp, including R15 bias and the bottom termination.
+R21 d6 adc 100k
+R22 d5 a5 100k
+R23 d4 a4 100k
+R24 d3 a3 100k
+R25 d2 a2 100k
+R26 d1 a1 100k
+R16 adc a5 49.9k
+R17 a5 a4 49.9k
+R18 a4 a3 49.9k
+R19 a3 a2 49.9k
+R20 a2 a1 49.9k
+Rtermination a1 0 100k
+R15 adc minus 10meg
+
+* 1342/3 reconstruction; matched starred resistors are 100k.
+R256 d1 r256out 100k
+R257 r256out a 100k
+R258 a r258out 100k
+R259 r258out 0 100k
+R260 d2 a 100k
+R261 d3 a 100k
+R262 d3 a 100k
+R263 a b 301k
+R264 a b 100k
+R265 b sum1 100k
+R266 d4 r266out 100k
+R267 r266out sum1 100k
+R268 d5 sum1 100k
+R269 d6 sum1 100k
+R270 d6 sum1 100k
+R271 amp1 sum1 12.1k
+EU48a amp1 0 0 sum1 1e12
+R272 amp1 sum2 12.1k
+R273 plus sum2 1meg
+R274T17 dac sum2 {11500+trim}
+EU48b dac 0 0 sum2 1e12
+
+.control
+set numdgt=15
+set width=160
+dc Vword 0 63 1
+print v(adc) v(dac)
+quit
+.endc
+.end

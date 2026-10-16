@@ -105,6 +105,7 @@ static inline int32 fbsat(int32 y)
 /* The sample loop, inlined into one copy per (linear, two): gcc then tests neither per sample. Four sub-blocks of
  * 8 samples, each with the coefficients at its middle on the line from a (the last block's end) to b (this
  * one's), as svf_run ramps: a cutoff moving each block doesn't step. */
+/* shortcut: acquisition uses this 32-sample ramp; replace after original-hardware settling measurements. */
 static inline __attribute__((always_inline)) void loop(int32 *s, int32 *buf, const struct ob1_coef *a,
                                                          const struct ob1_coef *b, const int linear, const int two)
 {

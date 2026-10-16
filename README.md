@@ -70,6 +70,11 @@ Everything in this repo builds (`BUILT`), lints against `core` and combines with
   do.
 - For **OB4/OB2**, **RESO / GAIN (F)** is the resonance: it self-oscillates from
   about 121, so the filter rings at FREQ even with no input.
+  **FREQ** selects 64 approximately semitone-spaced base settings, refreshed at about
+  64.69 Hz. The nominal base range is 51.5 Hz–1.96 kHz, with FREQ 64 at 327 Hz;
+  envelope and LFO modulation remain continuous and can move outside that base range.
+  This changes the cutoff of existing OB4/OB2 sounds. The midpoint is a retained
+  calibration reference, not a measured original OB-1 endpoint; see [the control model](docs/ob1-programmer.md).
 - **Second FLTR page**, while TYPE is COMB or TRASH, adds **C = Harmonics**
   (delay divider 1–4) and **G = Damping** (a one-pole on the feedback), each
   shown as a round dial like the stock SRR knob. They sit **alongside** the
@@ -108,15 +113,17 @@ full reverse-engineering are in [RE_NOTES.md](RE_NOTES.md)):
 
 Our DSP is integer-only (no FPU, no libgcc): a trapezoidal state-variable
 filter for BP/BP2, two feedback combs for COMB/TRASH, and a zero-delay-feedback
-OTA ladder for OB4/OB2. The cutoff and resonance are smoothed (a coefficient ramp
-across the block, and a fractional, smoothed comb delay) so modulating the filter
-does not step or click. The filter envelope is added to the cutoff exactly as the
-stock filter does.
+OTA ladder for OB4/OB2. BP/BP2 use coefficient ramps, and the comb delay is fractional
+and smoothed. OB4/OB2 hold the quantized base cutoff between control scans, then add
+the continuous LFO and filter-envelope contributions. Their existing coefficient
+ramp approximates acquisition over one audio block; original-hardware settling
+has not been measured. The filter-envelope calculation is the stock one.
 
 Per voice per render block (measured in digiemu / `tests/df_bench.py`), TYPE 1
 (stock) costs ~2400 instructions; **BP/BP2 ~1200 with static knobs and ~2400
 while the cutoff is swept** (the coefficients are cached and only recomputed when
-the cutoff/resonance actually move); COMB/TRASH ~1730; OB4/OB2 ~3000. So BP/BP2
+the cutoff/resonance actually move); COMB/TRASH ~1730; OB4 ~3140 and OB2 ~3080,
+including a control scan at RESO 64 or 127. So BP/BP2
 are now cheaper than the stock filter when the knobs are still, and every mode
 stays within the stock filter's own order. The SVF caches its coefficients, the
 OB-1 ladder computes them at the block's ends and ramps between them, and the

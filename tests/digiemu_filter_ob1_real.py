@@ -3,8 +3,8 @@
 
 Boots the firmware, opens FLTR, steps track 1's TYPE up with the encoder past 13 (its maximum, so it settles
 on OB2), and once the render's TYPE byte, params[0], is 13, at the per-voice filter call 0x400780c4: forces
-FREQ 80 (934 Hz), RESO 64 and ENV depth 0 in the render's record (as digiemu_filter_dsp.py does; kit writes
-reach the render only on a parameter change) and injects a 1500 Hz tone into voice 0's buffer, on the
+FREQ 80 in the raw engine and render records, RESO 64 and ENV depth 0 in the render's record
+(kit writes reach the render only on a parameter change) and injects a 1500 Hz tone into voice 0's buffer, on the
 filter's slope. After 40 blocks the output's peak is compared with tests/ob1_model.py's response. If the
 dispatch does not engage, TYPE 13 is clamped to the stock EQ 5 and the result is far off.
 
@@ -26,6 +26,7 @@ a = ap.parse_args()
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ob1_model as M  # noqa: E402
+import ob1_programmer as P  # noqa: E402
 
 FW = os.path.join(a.digiemu, "portable", "firmware", a.fw)
 sys.path.insert(0, a.digiemu)
@@ -77,6 +78,7 @@ def call_hook(u, address, size, user):
     if voice != 0 or rd(u, params, 1)[0] != TYPE:
         return
     u.mem_write(params + 2, struct.pack(">H", 80 << 8))                  # FREQ 80
+    u.mem_write(0x80001502 + 106 * voice + 2 * 0x1A, struct.pack(">H", 80 << 8))
     u.mem_write(params + 6, struct.pack(">H", 0x4000))                   # ENV depth 0
     u.mem_write(0x80001502 + 106 * voice + 2 * 0x1B, struct.pack(">H", 64 << 8))   # RESO 64
     state["meta"] = (u16(u, params + 2), u16(u, 0x80001502 + 106 * voice + 2 * 0x1B))
@@ -123,7 +125,7 @@ if not state["meta"] or len(state["out"]) <= SETTLE:
     sys.exit(1)
 
 fword, rword = state["meta"]
-fi, qi = fword / 256.0, min(127, rword >> 8)
+fi, qi = P.knob_cutoff8(fword) / 256.0, min(127, rword >> 8)
 out = state["out"][-1]
 peak = max(abs(v) for v in out) / float(AMP)
 model = M.h_analytic(1500.0, M.corner_hz(fi), M.gain_k(qi), 2)
