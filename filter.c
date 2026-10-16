@@ -16,7 +16,8 @@
  * level at 0x4199df58 + v*12, and the modulated cutoff is
  *   (FREQ<<16) + (((-env) * ((ENVword-0x4000)<<17)) >> 31).
  *
- * 32-bit integer arithmetic only: no FPU, no libgcc (mulsh / div55 by hand).
+ * DSP lives in df_dsp.c (shared, firmware-free, 1.1a verbatim): this file is
+ * the Digitakt adapter (kit slots, envelope, dispatch). Behavior identical.
  *
  * The FLTR page's FREQ/RES response *curve* is drawn by filter_ui.c, from a
  * core ev_draw handler (digifilter_draw) for TYPE 8..11. See RE_NOTES.md.
@@ -32,10 +33,7 @@
 #endif
 /* ---- end of the moved addresses ---- */
 
-typedef int int32;
-typedef unsigned int uint32;
-
-#include "filter_tables.h"
+#include "df_dsp.h"
 #include "ob1_vcf.h"
 
 /* ---- firmware (OS 1.53) ---- */
@@ -82,71 +80,14 @@ static const char *const FM_NAME[FM_NMODES] = { "BP", "BP2", "COMB", "TRASH" };
 #define OB_NTYPES      2
 
 /* ---- the coefficient set the DSP reads (filter_dsp.s) ---- */
-struct fcoef { int32 a1, a2, a3, c0, c1, c2; };
-struct fset { int32 run; int32 mode[8]; struct fcoef v[8]; };
+struct fset { int32 run; int32 mode[8]; struct df_coef v[8]; };
 static struct fset sets[2];
 static int cur;
 struct fset *digifilter_live;                       /* one 32-bit store switches the audio side */
-static int32 dsp_st[8][2];                          /* per voice: ic1, ic2 */
+static int32 voice_st[8][2];                        /* legacy digifilter_voice path only */
 static int prev_mode[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 
 extern void digifilter_svf(int32 *buf, int frames, const int32 *coef, int32 *state);
-
-/* floor(a * b / 2^sh) for 16 <= sh <= 31, when the result fits 32 bits */
-static inline __attribute__((always_inline)) int32 mulsh(int32 a, int32 b, int sh)
-{
-    uint32 ua = a < 0 ? -(uint32)a : (uint32)a, ub = b < 0 ? -(uint32)b : (uint32)b;
-    uint32 al = ua & 0xffff, ah = ua >> 16, bl = ub & 0xffff, bh = ub >> 16;
-    uint32 ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
-    uint32 mid = (ll >> 16) + (lh & 0xffff) + (hl & 0xffff);
-    uint32 lo = (ll & 0xffff) | (mid << 16);
-    uint32 hi = hh + (lh >> 16) + (hl >> 16) + (mid >> 16);
-    if ((a < 0) != (b < 0)) {
-        lo = ~lo + 1;
-        hi = ~hi + (lo == 0);
-    }
-    return (int32)((hi << (32 - sh)) | (lo >> sh));
-}
-
-/* floor(2^55 / d), d > 2^24 */
-static int32 div55(uint32 d)
-{
-    uint32 rem = 1u << 23, q = 0;
-    int i;
-    for (i = 0; i < 32; i++) {
-        uint32 carry = rem >> 31;
-        rem <<= 1;
-        q <<= 1;
-        if (carry || rem >= d) {
-            rem -= d;
-            q |= 1;
-        }
-    }
-    return (int32)q;
-}
-
-static int clampi(int v, int lo, int hi)
-{
-    return v < lo ? lo : v > hi ? hi : v;
-}
-
-/* the SVF coefficients and the mode's output mix (A = 1: no band gain) */
-static void mode_coef(int m, int fi, int qi, struct fcoef *c)
-{
-    /* Cap the resonance range: the top of the k table (Q 8) overshoots and
-     * clips on transients, so limit the maximum Q to index 13 (~Q 5). This is a
-     * coefficient-time change (the hot loop is unchanged). BP2 halves it. */
-    int qk = qi * 13 / 15;
-    int32 g = G27[fi], k = K27[m == FM_BP2 ? (qk >> 1) : qk], d24;
-    /* band-pass output mix: out = c1 * band  (c0 cancels the input's v0 term) */
-    c->c0 = -ONE27;
-    c->c1 = k;              /* mulsh(k, ONE27, 27) == k exactly, k >= 0 */
-    c->c2 = 0;
-    d24 = (1 << 24) + mulsh(g, g + k, 30);
-    c->a1 = div55((uint32)d24);
-    c->a2 = mulsh(g, c->a1, 27);
-    c->a3 = mulsh(g, c->a2, 27);
-}
 
 /* rebuild the set from the pattern's kit; called each UI frame (cheap: 8 voices) */
 static void commit(void)
@@ -155,7 +96,7 @@ static void commit(void)
     unsigned char *kit = UI_KIT;
     int t, run = 0;
     for (t = 0; t < 8; t++) {
-        struct fcoef *c = &s->v[t];
+        struct df_coef *c = &s->v[t];
         int type, m, fi, qi, j;
         for (j = 0; j < 6; j++)
             ((int32 *)c)[j] = 0;
@@ -168,9 +109,9 @@ static void commit(void)
             continue;
         /* TODO(RE): decode the stock FREQ/RESO words into the 0..127 / 0..15
          * indices. The shift below is a placeholder (the words are 0..32512). */
-        fi = clampi((unsigned)FSLOT(kit, t, FS_FREQ) >> 8, 0, 127);
-        qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 8, 0, 15);
-        mode_coef(m, fi, qi, c);
+        fi = df_clampi((unsigned)FSLOT(kit, t, FS_FREQ) >> 8, 0, 127);
+        qi = df_clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 8, 0, 15);
+        df_mode_coef(m, fi, qi, c);
         s->mode[t] = m;
         run = 1;
     }
@@ -179,8 +120,8 @@ static void commit(void)
     digifilter_live = s;
     for (t = 0; t < 8; t++)
         if (s->mode[t] != prev_mode[t]) {           /* a mode change restarts the filter */
-            dsp_st[t][0] = 0;
-            dsp_st[t][1] = 0;
+            voice_st[t][0] = 0;
+            voice_st[t][1] = 0;
             prev_mode[t] = s->mode[t];
         }
 }
@@ -273,94 +214,8 @@ static void df_persist(void)
  *   Damping   0x30 (G)  raw word -> one-pole on the feedback (0 = off)
  * Their defaults (0) leave the plain comb. */
 
-/* ---- COMB state (per voice) ---- */
-#define COMB_N 256                   /* power of two: delay wraps with a mask */
-#define COMB_MASK (COMB_N - 1)
-static int32 comb_buf[8][COMB_N];
-static int comb_pos[8];
-static int comb_init[8];
-static int32 comb_dly[8];            /* Q16 smoothed delay in samples */
-static int32 comb_g[8];              /* Q27 smoothed feedback */
-static int32 comb_lp[8];             /* Q27 one-pole state for the damping */
-static int prev_filt_type[8];        /* reset state when the mode changes */
-
-/* Per-sample smoothing shifts. The delay is smoothed so changing the cutoff
- * (or the filter envelope) glides instead of clicking; the feedback is smoothed
- * for the same reason. */
-#define COMB_DSHIFT 6                /* ~64 samples (1.3 ms) */
-#define COMB_GSHIFT 7
-
-/* Feedback comb, fractional and smoothed: y = x + g*y[n-D]. D = COMB_DELAY[fi]
- * / (div * hdiv) (clamped 3..255), g from the RESO/GAIN knob. COMB uses div 1;
- * TRASH uses div 2 for a higher (different) harmonic series. The delay is
- * interpolated (linear) so it can move continuously; the output is saturated so
- * high feedback cannot run away at the extreme cutoffs. */
-static void comb_run(int32 *buf, int frames, int fi, int fb, int v, int div,
-                     int hdiv, int damp)
-{
-    /* Harmonics adds a divider on top of the mode's own (COMB 1 / TRASH 2). */
-    int32 target = COMB_DELAY[fi] / (div * hdiv);
-    int32 tdq, gt, *b = comb_buf[v];
-    int p, i;
-    if (target < 3)
-        target = 3;                  /* taper: no near-Nyquist comb */
-    if (target > COMB_MASK)
-        target = COMB_MASK;
-    tdq = target << 16;
-    /* Feedback 0..127 -> 0 .. 31/32: near self-oscillation for a metallic,
-     * ringing comb. The per-sample output saturation below keeps it bounded. */
-    gt = (int32)fb * ((ONE27 / 32) * 31 / 127);
-    if (!comb_init[v]) {
-        comb_init[v] = 1;
-        comb_dly[v] = tdq;           /* start at the target, no glide-in */
-        comb_g[v] = gt;
-        comb_lp[v] = 0;
-        comb_pos[v] = 0;
-        for (i = 0; i < COMB_N; i++)
-            b[i] = 0;
-    }
-    p = comb_pos[v];
-    for (i = 0; i < frames; i++) {
-        int32 ds, ip, fp, i0, i1, x, val, y, fa, da, ga, va;
-        comb_dly[v] += (tdq - comb_dly[v]) >> COMB_DSHIFT;
-        comb_g[v] += (gt - comb_g[v]) >> COMB_GSHIFT;
-        ds = comb_dly[v];
-        ip = ds >> 16;
-        fp = ds & 0xffff;
-        i0 = (p - ip) & COMB_MASK;
-        i1 = (i0 - 1) & COMB_MASK;
-        x = buf[i];
-        /* Linear interpolation, but with one 32x32 multiply instead of mulsh:
-         * (fp*diff)>>16 == ((fp>>1)*((diff)>>13))>>2, both factors < 2^15. */
-        fa = fp >> 1;
-        da = (b[i1] - b[i0]) >> 13;
-        val = b[i0] + ((fa * da) >> 2);
-        if (damp) {                  /* Damping: darken the tail */
-            comb_lp[v] += (val - comb_lp[v]) >> 4;
-            val += mulsh(comb_lp[v] - val, damp, 15);
-        }
-        /* Feedback: (comb_g*val)>>27 == ((comb_g>>12)*(val>>11))>>4. */
-        ga = comb_g[v] >> 12;
-        va = val >> 11;
-        y = x + ((ga * va) >> 4);
-        if (y > (1 << 27))
-            y = 1 << 27;
-        else if (y < -(1 << 27))
-            y = -(1 << 27);
-        b[p] = y;
-        p = (p + 1) & COMB_MASK;
-        buf[i] = y;
-    }
-    comb_pos[v] = p;
-}
-
-/* The render's smoothed cutoff moves continuously; we sample it once per 32
- * frame block, which steps the SVF coefficients. Ramp the cutoff and resonance
- * indices from the previous block's values across four 8-frame sub-blocks so
- * the coefficients glide (as the stock filter does). */
-static int svf_fi[8], svf_qi[8];
-static int svf_have[8];
-static struct fcoef svf_c[8];                /* the coefficients at (svf_fi, svf_qi), cached */
+/* Reset shared DSP state when the mode changes (df_dsp.c holds the state). */
+static int prev_filt_type[8];        /* zero-initialised: first block resets */
 
 /* filter_glue.s: digifilter_dispatch remembers the a3 the render set (the
  * stock filter, or digihealth's wrapper) so stock types keep their target. */
@@ -375,10 +230,10 @@ static int cutoff_index(unsigned char *params, int v)
     int depth = ((int)(unsigned)PARAM_ENV(params) - 0x4000) << 17;
     if (depth) {
         int32 env = ENV_LEVEL(v);
-        int32 envmod = mulsh((int32)(0u - (uint32)env), depth, 31);  /* (-env)*depth>>31 */
+        int32 envmod = df_mulsh((int32)(0u - (uint32)env), depth, 31);
         base += envmod >> 16;                             /* to FREQ-word units */
     }
-    return clampi(base >> 8, 0, 127);
+    return df_clampi(base >> 8, 0, 127);
 }
 
 /* cutoff_index() without the rounding: 8.8, 0..127 << 8, for the OB-1 modes' fractional cutoff */
@@ -388,63 +243,10 @@ static int cutoff_index8(unsigned char *params, int v)
     int depth = ((int)(unsigned)PARAM_ENV(params) - 0x4000) << 17;
     if (depth) {
         int32 env = ENV_LEVEL(v);
-        int32 envmod = mulsh((int32)(0u - (uint32)env), depth, 31);  /* (-env)*depth>>31 */
+        int32 envmod = df_mulsh((int32)(0u - (uint32)env), depth, 31);
         base += envmod >> 16;                             /* to FREQ-word units */
     }
-    return clampi(base, 0, 127 << 8);
-}
-
-static void svf_run(int m, int fi, int qi, int32 *buf, int v)
-{
-    struct fcoef c0, c1;
-    int k, same;
-    /* Compute the coefficients only when the cutoff/resonance actually move
-     * (mode_coef runs a 32-step division and several 32x32 muls): cache the
-     * last block's set and reuse it. The common static-knob case then costs no
-     * coefficient work at all and needs a single digifilter_svf call for the
-     * whole 32-frame block instead of four 8-frame calls. When the indices do
-     * move, ramp the one new set from the cached one across the four sub-blocks
-     * (a linear ramp is as smooth as the old four mode_coef points, at 1/2 the
-     * coefficient cost). */
-    if (svf_have[v]) {
-        c0 = svf_c[v];
-        if (svf_fi[v] == fi && svf_qi[v] == qi) {
-            same = 1;
-            c1 = c0;
-        } else {
-            same = 0;
-            mode_coef(m, fi, qi, &c1);
-            svf_c[v] = c1;
-            svf_fi[v] = fi;
-            svf_qi[v] = qi;
-        }
-    } else {
-        mode_coef(m, fi, qi, &c1);            /* first block: no last set to ramp from */
-        svf_c[v] = c1;
-        svf_fi[v] = fi;
-        svf_qi[v] = qi;
-        svf_have[v] = 1;
-        c0 = c1;
-        same = 1;
-    }
-    if (same) {
-        digifilter_svf(buf, 32, (const int32 *)&c1, dsp_st[v]);
-        return;
-    }
-    for (k = 0; k < 4; k++) {
-        int w = k + 1;                               /* 1..4, ends exactly at c1 */
-        int32 *d = (int32 *)&c0, *e = (int32 *)&c1;
-        struct fcoef c;
-        int32 *o = (int32 *)&c;
-        int j;
-        for (j = 0; j < 6; j++) {
-            /* Lerp d..e by w/4 without overflowing on a large jump: split the
-             * delta so no intermediate exceeds 32 bits. */
-            int32 delta = e[j] - d[j];
-            o[j] = d[j] + (delta >> 2) * w + (((delta & 3) * w) >> 2);
-        }
-        digifilter_svf(buf + 8 * k, 8, (const int32 *)&c, dsp_st[v]);
-    }
+    return df_clampi(base, 0, 127 << 8);
 }
 
 int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
@@ -459,12 +261,12 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
         if (ob >= 0 && ob < OB_NTYPES) {
             /* OB4/OB2: the same cutoff (FREQ + the filter envelope) and RESO (0..127) as the combs read */
             if (prev_filt_type[voice] != type) {
-                if (prev_filt_type[voice] < OB_FIRST_TYPE)          /* from BP..TRASH, or the first time */
+                if (prev_filt_type[voice] < OB_FIRST_TYPE)
                     ob1_vcf_reset(voice);
                 prev_filt_type[voice] = type;
             }
             ob1_vcf_run(ob ? OB1_TAP2 : OB1_TAP4, cutoff_index8(params, voice),
-                        clampi((int)(unsigned)SET_RESO(voice) >> 8, 0, 127), buf, voice);
+                        df_clampi((int)(unsigned)SET_RESO(voice) >> 8, 0, 127), buf, voice);
             return 1;
         }
         if (m >= 0 && m < FM_NMODES) {
@@ -473,25 +275,22 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
              * same fields the stock per-voice filter reads, so the FLTR knobs
              * and the filter envelope track. */
             int fi = cutoff_index(params, voice);
-            int qi = clampi((unsigned)SET_RESO(voice) >> 11, 0, 15);
-            if (prev_filt_type[voice] != type) {         /* mode change: fresh state */
-                comb_init[voice] = 0;
-                svf_have[voice] = 0;
-                dsp_st[voice][0] = 0;
-                dsp_st[voice][1] = 0;
+            int qi = df_clampi((unsigned)SET_RESO(voice) >> 11, 0, 15);
+            if (prev_filt_type[voice] != type) {
+                df_reset(voice);
                 prev_filt_type[voice] = type;
             }
             if (m <= FM_BP2) {
-                svf_run(m, fi, qi, buf, voice);
+                df_svf_run(m, fi, qi, buf, voice);
             } else {
                 /* Comb feedback is the RESO/GAIN knob (engine slot 0x1b, 0..127);
                  * C/G on the second FLTR page add Harmonics / Damping. */
-                int fb = (int)(unsigned)SET_RESO(voice) >> 8;               /* 0..127 */
-                int harm = (int)(unsigned)PARAM_SLOT(params, FS_HARM) >> 8; /* 0..127 */
+                int fb = (int)(unsigned)SET_RESO(voice) >> 8;
+                int harm = (int)(unsigned)PARAM_SLOT(params, FS_HARM) >> 8;
                 int damp = (int)(unsigned)PARAM_SLOT(params, FS_DAMP);
-                int hdiv = 1 + harm * 3 / 127;                 /* 1..4 */
-                int div = (m == FM_COMB) ? 1 : 2;              /* TRASH = div 2 */
-                comb_run(buf, 32, fi, fb, voice, div, hdiv, damp);
+                int hdiv = 1 + harm * 3 / 127;
+                int div = (m == FM_COMB) ? 1 : 2;
+                df_comb_run(buf, 32, fi, fb, voice, div, hdiv, damp);
             }
             return 1;
         }
@@ -507,7 +306,7 @@ void digifilter_voice(int v, int32 *buf, int frames)
     struct fset *s = digifilter_live;
     if (!s || !s->run || v < 0 || v >= 8 || s->mode[v] < 0)
         return;
-    digifilter_svf(buf, frames, (const int32 *)&s->v[v], dsp_st[v]);
+    digifilter_svf(buf, frames, (const int32 *)&s->v[v], voice_st[v]);
 }
 
 /* filter_ui.c: re-map the second FLTR page (kind 7) for COMB/TRASH. */
