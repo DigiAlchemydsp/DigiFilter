@@ -1,29 +1,46 @@
 # releases
 
-Prebuilt DigiFilter for the **Digitakt mk1, OS 1.53**.
+Prebuilt DigiFilter for the **Digitakt mk1, OS 1.53 and OS 1.54**.
 
 | file | |
 |---|---|
-| `elemods/digifilter-1.0k.elemod` | the mod (current) |
-| `DigiFilter-1.0k.zip` | the release package: `elemods/` + `sources/` + README (install/build) + LICENSE |
-| `elemods/digifilter-1.0j.elemod`, `DigiFilter-1.0j.zip` | the previous release |
-| `elemods/digifilter-1.0i.elemod`, `DigiFilter-1.0i.zip`, `elemods/digifilter-1.0h.elemod`, `DigiFilter-1.0h.zip` | earlier releases |
+| `elemods/digifilter-1.1a.elemod` | the mod, **OS 1.53** (current) |
+| `elemods/digifilter-1.1a-os1.54.elemod` | the mod, **OS 1.54** |
+| `DigiFilter-1.1a.zip` | the release package: both elemods + `sources/` + README (install/build) + LICENSE |
+| `elemods/digifilter-1.1.elemod`, `DigiFilter-1.1.zip` | the previous release (OS 1.53) |
+| `elemods/digifilter-1.0k.elemod`, `DigiFilter-1.0k.zip` | an earlier release |
+| `elemods/digifilter-1.0j.elemod`, `DigiFilter-1.0j.zip`, `elemods/digifilter-1.0i.elemod`, `DigiFilter-1.0i.zip`, `elemods/digifilter-1.0h.elemod`, `DigiFilter-1.0h.zip` | earlier releases |
 
-The `.elemod` needs `core` (e.g. `core-2.1.elemod`, from
-[elekloader](https://github.com/irpina/elekloader)) and the stock OS file
-`Digitakt_OS1.53.syx`. The zip's README has the full install and
-build-from-source instructions. See [../CHANGELOG.md](../CHANGELOG.md) for the
-full history.
+Each `.elemod` needs `core` from
+[elekloader](https://github.com/irpina/elekloader) and the matching stock OS file
+(`Digitakt_OS1.53.syx` or `Digitakt_OS1.54.syx`). The zip's README has the full
+install and build-from-source instructions. See
+[../CHANGELOG.md](../CHANGELOG.md) for the full history.
 
-Install:
+Install (OS 1.53; for 1.54 use the 1.54 stock, the `-os1.54` elemod and a 1.54
+`core`):
 
 ```sh
 python -m elekloader.patch --stock Digitakt_OS1.53.syx \
-    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.0k.elemod \
+    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.1a.elemod \
     --out Digitakt_OS1.53-digifilter.syx --version 2.0t
 ```
 
 Then flash the `.syx` with Elektron Transfer.
+
+New in 1.1a: a performance pass over the per-voice DSP — BP/BP2 recompute the
+state-variable filter's coefficients only when the cutoff/resonance move, so with
+static knobs they cost ~60 % fewer instructions (~1229 vs 3113 per voice per
+block, below the stock filter) and ~22 % fewer while modulated; the audio is
+bit-for-bit the same. The mod now also builds for **OS 1.54** from the same
+source tree. See [../CHANGELOG.md](../CHANGELOG.md) and
+[../HANDOFF-OPTIMIZATION.md](../HANDOFF-OPTIMIZATION.md).
+
+New in 1.1: two more types, **OB4 (12)** and **OB2 (13)**, the Oberheim OB-1's
+filter — its 4-pole lowpass ladder and its 2-pole output — self-oscillating at
+the top of RESO (from about 121), with the FLTR page drawing their response.
+Contributed by Simon Johansson (PR #2); how they were made and checked is in
+[docs/ob1.md](../docs/ob1.md). See [../CHANGELOG.md](../CHANGELOG.md).
 
 New in 1.0k: while TYPE is COMB or TRASH the **RESO / GAIN** knob is the comb
 feedback (0…127, up to 31/32 — near self-oscillation for a metallic ring), and
