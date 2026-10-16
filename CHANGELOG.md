@@ -31,6 +31,10 @@ identical to 1.1; only the cost changed.
   through a per-OS `F_…`/`.LF_…` macro, so the same tree builds for OS 1.53 and
   1.54 (elekloader 0.5+). The 1.53 build is byte-for-byte unchanged.
 
+### Verified
+
+- Tested on hardware (Digitakt mk1), OS 1.53 and OS 1.54: **PASS**.
+
 ## [1.1] - 2026-10-16
 
 The OB-1's filter as two more types (contributed by Simon Johansson, PR #2).

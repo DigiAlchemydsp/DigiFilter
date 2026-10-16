@@ -71,4 +71,5 @@ The package contains the mod's own bytes only; no Elektron firmware. See
 [../LICENSE](../LICENSE). Rebuild with `elekloader.sdk.build` from the sources
 under `../` (see [../README.md](../README.md)).
 
-Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1).
+Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1). **1.1a** was
+tested on hardware (Digitakt mk1) on both **OS 1.53** and **OS 1.54**: PASS.

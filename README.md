@@ -47,7 +47,8 @@ page's FREQ/RES response curve and TYPE-box glyphs**, which now redraw for the
 new modes (a band-pass bell for BP/BP2, comb teeth for COMB/TRASH, a lowpass for
 OB4/OB2). See [RE_NOTES.md](RE_NOTES.md).
 
-Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1).
+Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1). **1.1a** was
+tested on hardware (Digitakt mk1) on both **OS 1.53** and **OS 1.54**: PASS.
 
 Everything in this repo builds (`BUILT`), lints against `core` and combines with
 `digihealth` (`OK: the mods combine`).
