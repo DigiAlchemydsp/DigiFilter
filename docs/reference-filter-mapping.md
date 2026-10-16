@@ -1,7 +1,8 @@
 # Measured reference filter mapping
 
 Measured on 16 October 2026. The target is the reference plugin's dry OB4 and OB2 behavior. These are
-software measurements, not a calibration of a physical Oberheim OB-1. The existing filter is unchanged.
+software measurements, not a calibration of a physical Oberheim OB-1. The resulting control calibration
+and its remaining differences are described in [the filter reference](ob1.md#control-calibration).
 
 ## Conditions and evidence
 

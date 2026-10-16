@@ -3,7 +3,7 @@
 
 Boots the firmware, opens FLTR, steps track 1's TYPE up with the encoder past 13 (its maximum, so it settles
 on OB2), and once the render's TYPE byte, params[0], is 13, at the per-voice filter call 0x400780c4: forces
-FREQ 80 (934 Hz), RESO 64 and ENV depth 0 in the render's record (as digiemu_filter_dsp.py does; kit writes
+FREQ 80, RESO 64 and ENV depth 0 in the render's record (as digiemu_filter_dsp.py does; kit writes
 reach the render only on a parameter change) and injects a 1500 Hz tone into voice 0's buffer, on the
 filter's slope. After 40 blocks the output's peak is compared with tests/ob1_model.py's response. If the
 dispatch does not engage, TYPE 13 is clamped to the stock EQ 5 and the result is far off.

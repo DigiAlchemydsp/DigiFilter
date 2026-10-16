@@ -14,7 +14,7 @@ in C instead of EMAC) and runs it and the model on the same input:
 - a full-scale sweep, FREQ 20-90-20 one step a block, whose steps must be no larger than a gliding model's;
 - a small sweep, one FREQ step a block, against the model gliding sample by sample (the kernel ramps its
   coefficients across each block);
-- self-oscillation from digital silence: RESO 127 must start in time at every FREQ from 32 up.
+- self-oscillation from digital silence: RESO 127 must start, including at the 10 Hz endpoint.
 
     python tests/ob1_check.py            # exit 1 if any check exceeds its tolerance
 """
@@ -76,7 +76,7 @@ def kernel_thd(so, fi, qi, amp, f0=200.0):
     for b in range(n // 32):
         for i in range(32):
             buf[i] = x[32 * b + i]
-        so.ob1_vcf_run(4, fi << 8, qi, buf, 0)
+        so.ob1_vcf_run(4, round(fi * 256), qi, buf, 0)
         y += list(buf)
     y = y[per * 48:]
     a = [abs(sum(v * cmath.exp(-2j * math.pi * h * 48 / len(y) * i) for i, v in enumerate(y))) for h in range(1, 8)]
@@ -87,8 +87,8 @@ def main():
     so = build()
     worst = 0.0
     fails = []
-    for fi in (16, 32, 48, 64, 80, 96, 112, 127):
-        for qi in (0, 64, 112, 115):            # 115: k ~3.8, the highest for a linear comparison
+    for fi in (0, 16, 32, 48, 64, 80, 96, 112, 127):
+        for qi in (0, 32, 64, 78):             # 78: k ~3.8, below oscillation
             for tap in (4, 2):
                 k, m = kernel_step(so, tap, fi, qi), model_step(tap, fi, qi)
                 peak = max(abs(v) for v in m)
@@ -99,12 +99,13 @@ def main():
                     fails.append((fi, qi, tap))
                 print('FREQ %3d (%7.1f Hz)  RESO %3d (k %.2f)  OB%d: max error %.2e%s'
                       % (fi, M.corner_hz(fi), qi, M.gain_k(qi), tap, err, flag))
-    print('worst %.2e; %d of %d over %.0e' % (worst, len(fails), 8 * 4 * 2, TOL))
-    # the saturation: FREQ 81 is a 995 Hz corner, near the SPICE runs' 990 Hz; RESO 0 and 101 (k 3.34)
-    for qi in (0, 101):
+    print('worst %.2e; %d of %d over %.0e' % (worst, len(fails), 9 * 4 * 2, TOL))
+    # Keep the distortion fixture near its 990 Hz, k ~3.3 physical operating point.
+    thd_fi = 127 * ((990 - 10) / 20990) ** (1 / 3)
+    for qi in (0, 73):
         for amp in (0.5, 1.0, 2.0):                 # two VCOs is a full-scale sample
-            got = kernel_thd(so, 81, qi, amp)
-            want = M.thd(amp, M.gain_k(qi), fc=M.corner_hz(81), stages=False)
+            got = kernel_thd(so, thd_fi, qi, amp)
+            want = M.thd(amp, M.gain_k(qi), fc=M.corner_hz(thd_fi), stages=False)
             db = abs(20 * math.log10(max(got, 1e-6) / max(want, 1e-6)))
             bad = qi and db > 1.0                   # within 1 dB (RESO 0: both ~0, nothing to compare)
             if bad:
@@ -115,14 +116,14 @@ def main():
     # real levels: a full-scale saw at low cutoff, the states must not wrap (they did at Q31 before IN_SHIFT)
     n = 32 * 750
     saw = [round(((i * 110 % 48000) / 24000.0 - 1) * (2 * VCO - 1)) for i in range(n)]
-    for fi in (30, 50, 80):
-        for qi in (5, 64, 112):
+    for fi in (13, 23, 45):
+        for qi in (16, 58, 77):
             so.ob1_vcf_reset(0)
             y = []
             for b in range(n // 32):
                 for i in range(32):
                     buf[i] = saw[32 * b + i]
-                so.ob1_vcf_run(4, fi << 8, qi, buf, 0)
+                so.ob1_vcf_run(4, round(fi * 256), qi, buf, 0)
                 y += list(buf)
             ref = M.Ladder().run([v / VCO for v in saw], M.corner_hz(fi), M.gain_k(qi), 4, stages=False)
             err = max(abs(a / VCO - r) for a, r in zip(y, ref)) / max(abs(r) for r in ref)
@@ -142,17 +143,17 @@ def main():
         xs = [(((n + i) * 110 % 48000) / 24000.0 - 1) * 2 for i in range(32)]
         for i in range(32):
             buf[i] = min(round(xs[i] * VCO), (1 << 31) - 1)
-        so.ob1_vcf_run(4, fe << 8, 100, buf, 0)
+        so.ob1_vcf_run(4, fe << 8, 73, buf, 0)
         k += [v / VCO for v in buf]
         for i in range(32):
-            m += lad.run([xs[i]], M.corner_hz(fs + (fe - fs) * (i + 0.5) / 32), M.gain_k(100), 4, stages=False)
+            m += lad.run([xs[i]], M.corner_hz(fs + (fe - fs) * (i + 0.5) / 32), M.gain_k(73), 4, stages=False)
         n += 32
     kj = max(abs(k[i + 1] - k[i]) for i in range(len(k) - 1))
     mj = max(abs(m[i + 1] - m[i]) for i in range(len(m) - 1))
     bad = kj > 1.1 * mj
     if bad:
         fails.append(('sweep at level',))
-    print('sweep at full scale, FREQ 20-90-20, RESO 100: largest step %.4f, a gliding model\'s %.4f%s'
+    print('sweep at full scale, FREQ 20-90-20, RESO 73: largest step %.4f, a gliding model\'s %.4f%s'
           % (kj, mj, '  <- clicks' if bad else ''))
     # a cutoff sweep, FREQ 40 to 110 one step a block, RESO 64, a 220 Hz sine: the kernel's ramp against a glide
     buf = (ctypes.c_int * 32)()
@@ -174,9 +175,8 @@ def main():
         fails.append(('sweep',))
     print('cutoff sweep, one step a block, against a glide: max error %.2e of peak%s'
           % (err, '  <- over 5e-3' if err > 5e-3 else ''))
-    # self-oscillation from silence: RESO 127 starts at every FREQ from 32 up, sooner the higher (K_MAX8 sets how
-    # fast; the seed's random sign is what lets a low cutoff start at all)
-    for fi, limit in ((32, 3.5), (48, 1.5), (64, 1.0), (96, 0.2), (112, 0.2)):
+    # The lowest cutoff needs enough cycles for the quiet seed to reach the measurement threshold.
+    for fi, limit in ((0, 16.0), (32, 3.5), (48, 1.5), (64, 1.0), (96, 0.2), (112, 0.2)):
         so.ob1_vcf_reset(0)
         start = None
         for b in range(int(1500 * limit * 2)):

@@ -7,19 +7,15 @@
  * G^4 u + S; the feedback through U28's saturation, u = x - k T(that); the four one-poles, v = G (in - s),
  * y = v + s, s' = y + v. Per block: G from the table (interpolated), G^4, 1 / (1 + k G^4) and
  * G^4 / (1 + k G^4), ramped from the last block's across four sub-blocks. The stages' own saturation (the
- * model's KS) is left out: it only shows without resonance, about 0.03 % THD at twice a VCO's level (SPICE,
- * https://github.com/simonjohansson/DigiFilter/issues/2).
+ * model's KS) is left out: it only shows without resonance, about 0.03 % THD at twice a VCO's level in SPICE.
  *
- * Tunable: IN_SHIFT, the level (a full-scale Q31 sample is two OB-1 VCOs at ON); K_MAX8, where RESO
- * self-oscillates (~121) and how fast RESO 127 starts howling from silence (about 0.05 s at FREQ 96, 0.35 s
- * at 64, 1 s at 48, 3 s at 32; the seed is random, so roughly; a higher K_MAX8 starts sooner). */
+ * Cubic cutoff and quadratic subthreshold resonance follow the measured reference controls. */
 #include "ob1_vcf.h"
 #include "ob1_tables.h"
 
 typedef int int32;
 typedef unsigned int uint32;
 
-#define K_MAX8      1127428915  /* K_MAX / 8 = 0.525 (k 4.2 at RESO 127), Q31; k / 4 would not fit */
 /* U28's knee on y4: the model's KF = 1.61, with one VCO = 2^27 internally. */
 #define INV_KF      325645      /* 2^46 / (1.61 * 2^27): fmul(y, INV_KF) = y / KF in Q15 */
 #define KF4_5       172872434   /* 4/5 KF: the polynomial at y = KF, its ceiling */
@@ -35,7 +31,7 @@ typedef unsigned int uint32;
                                    round away in the stages (a stage passes nothing under ~0.5 / G LSBs). A sign
                                    that only alternated (a 750 Hz pattern) never started a low cutoff; the
                                    random one has the low frequencies */
-#define SEED_K8     (K_MAX8 / 127 * 119)    /* only from RESO 119 (k 3.94) up: below, it would leak to the
+#define SEED_K8     1057635697  /* k / 8 = 3.94 / 8, Q31: only near oscillation, otherwise it would leak to the
                                    output and silence in would not give silence out */
 
 #ifdef __mcoldfire__
@@ -77,12 +73,18 @@ void ob1_vcf_reset(int v)
 static void coef(int fi8, int qi, struct ob1_coef *c)
 {
     int32 G, G4, i = fi8 >> 8;
-    uint32 den16;
+    uint32 den16, k24;
     G = OB1_G[i] + ((OB1_G[i + 1] - OB1_G[i]) >> 8) * (fi8 & 0xff);
     G4 = fmul(G, G);
     G4 = fmul(G4, G4);
     c->G = G;
-    c->k8 = (int32)((uint32)K_MAX8 / 127u * (uint32)qi);                /* k / 8, Q31 */
+    k24 = (10u * (1u << 24) / (127 * 127)) * (uint32)(qi * qi);
+    /* Compress above-onset drive to match the measured amplitude rise with the retained saturation. */
+    if (k24 > (4u << 24)) {
+        uint32 d12 = (k24 >> 12) - (5u << 11);                        /* k - 2.5, Q12 */
+        k24 = ((17u << 14) - (3u << 25) / d12) << 8;                  /* 4.25 - 0.375/(k - 2.5), Q24 */
+    }
+    c->k8 = (int32)(k24 << 4);                                       /* k / 8, Q31 */
     den16 = 65536u + ((uint32)fmul(c->k8, G4) >> 12);                  /* 1 + k G^4, Q16 */
     c->r = (int32)((0x80000000u / den16) << 15);                        /* its reciprocal, Q30 */
     c->g4r = fmul(G4, c->r) << 1;                                      /* G^4 / (1 + k G^4), Q31 */
