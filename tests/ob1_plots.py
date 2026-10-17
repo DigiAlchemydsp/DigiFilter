@@ -58,7 +58,7 @@ def response_plot(so):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharey=True)
     f = np.logspace(np.log10(20), np.log10(20000), 400)
     for ax, tap, name in ((axes[0], 4, 'OB4'), (axes[1], 2, 'OB2')):
-        for qi, col in ((0, 'C0'), (64, 'C1'), (100, 'C2'), (115, 'C3')):
+        for qi, col in ((0, 'C0'), (32, 'C1'), (64, 'C2'), (78, 'C3')):
             k = M.gain_k(qi)
             model = [20 * math.log10(M.h_analytic(x, M.corner_hz(64), k, tap) / M.LEVEL) for x in f]
             ax.semilogx(f, model, col, label='RESO %d (k %.2f)' % (qi, k))
@@ -130,10 +130,11 @@ def spice_thd():
 def thd_plot(so, spice):
     amps = [0.25, 0.5, 1.0, 2.0, 4.0]                                  # x one VCO (1.25 .. 20 V)
     fig, ax = plt.subplots(figsize=(6.4, 4.2))
-    for k, qi, col in ((0.0, 0, 'C0'), (3.33, 101, 'C3')):
+    for k, qi, col in ((0.0, 0, 'C0'), (3.33, 73, 'C3')):
         model = [M.thd(a, k) for a in amps]
         kamps = [a for a in amps if a <= 2.0]                         # two VCOs is a full-scale sample
-        kern = [C.kernel_thd(so, 81, qi, a) for a in kamps]
+        fi = 127 * ((990 - 10) / 20990) ** (1 / 3)
+        kern = [C.kernel_thd(so, fi, qi, a) for a in kamps]
         ax.loglog(amps, spice[k], col, lw=2.2, alpha=0.45, label='SPICE, k %.2f' % k)
         ax.loglog(amps, model, col, ls='--', lw=1, label='model, k %.2f' % k)
         if k:

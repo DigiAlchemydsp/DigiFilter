@@ -34,6 +34,11 @@ The FLTR page draws their lowpass response; top to bottom, LP (stock), OB4 and
 OB2. How they were made and checked (SPICE, a model, the fixed-point kernel,
 digiemu, a unit) is in [docs/ob1.md](docs/ob1.md).
 
+Their FREQ control now follows the measured reference curve, from 10 Hz to
+21 kHz with cubic travel. Resonance starts oscillating between RESO 80 and 81.
+Existing OB4/OB2 Sounds therefore change at the same knob settings; their saved
+format is unchanged. See the [calibration and its limits](docs/ob1.md#control-calibration).
+
 ![The FLTR page for LP, OB4 and OB2](docs/img/ob1-fltr.png)
 
 > Digitakt **mk1 only**. Digitakt II's filter machines are out of scope.
@@ -175,6 +180,9 @@ third site is chosen so this mod does **not** overlap digihealth 1.0.
 
 ## Testing
 
+The OB4/OB2 [validation commands](docs/ob1.md#files) cover the native kernel,
+measured calibration targets and focused ColdFire/firmware simulator checks.
+
 ```powershell
 # floating-point model self-test (no toolchain needed)
 python tests/filter_model.py
@@ -205,7 +213,7 @@ elemods (1.1, 1.0k, 1.0j, 1.0i, 1.0h).
 - **Digital Alchemy DSP** — the mod: the band-pass **BP / BP2** (state-variable),
   **COMB** and **TRASH** modes, the per-voice DSP and the FLTR-page response
   curve.
-- **Simon Johansson** (PR #2) — the **OB4** and **OB2** modes: the Oberheim
+- **Simon Johansson** — the **OB4** and **OB2** modes: the Oberheim
   OB-1's VCF as a zero-delay-feedback ladder and its 2-pole output, from his
   SPICE study of the circuit (see [docs/ob1.md](docs/ob1.md)).
 
