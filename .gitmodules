@@ -1,0 +1,6 @@
+[submodule "vendor/elekloader"]
+	path = vendor/elekloader
+	url = https://github.com/irpina/elekloader
+[submodule "vendor/digiemu"]
+	path = vendor/digiemu
+	url = https://github.com/irpina/digiemu

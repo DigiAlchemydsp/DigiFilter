@@ -1,0 +1,74 @@
+[tools]
+python = "3.12"
+uv = "0.11.8"
+cmake = "4.4.4"
+gh = "2.94.0"
+
+[tools."http:m68k-elf"]
+version = "14.2.0"
+os = ["windows"]
+url = "https://github.com/iratahack/m68k-elf-gcc/releases/download/v{{ version }}_latest/i686-w64-mingw32.zip"
+checksum = "sha256:b7cde7adb002ea7bce2ee2cd6c97f26459d126c64966b9f67e57c47c0bc98af7"
+strip_components = 1
+bin_path = "bin"
+
+[bootstrap.packages]
+"brew:m68k-elf-gcc" = "latest"
+"brew:m68k-elf-binutils" = "latest"
+"apt:build-essential" = "latest"
+
+[env]
+_.path = ["/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin"]
+ELEKLOADER_CROSS = "{{ get_env(name='ELEKLOADER_CROSS', default='m68k-elf-') }}"
+ELEKLOADER_STOCK = "{{ get_env(name='ELEKLOADER_STOCK', default=config_root ~ '/firmware/Digitakt_OS1.54.syx') }}"
+FW_VERSION = "{{ get_env(name='FW_VERSION', default='DFlt') }}"
+DIGIEMU_HOME = "{{ get_env(name='DIGIEMU_HOME', default=config_root ~ '/.digiemu') }}"
+
+[tasks.bootstrap]
+description = "Fetch pinned dependencies and set up the simulator's patched Unicorn"
+run = ["git submodule update --init", "python tools/tasks.py bootstrap"]
+
+[tasks.build]
+description = "Build core and DigiFilter for the selected OS (default 1.54)"
+run = "python tools/tasks.py build"
+
+[tasks.check]
+description = "Lint and check composition for the selected OS after building"
+depends = ["build"]
+run = "python tools/tasks.py check"
+
+[tasks.test]
+description = "Run workflow, model, native DSP, artefact and calibration checks"
+run = [
+  "python -m unittest discover -s tests -p test_tasks.py",
+  "python tests/filter_model.py",
+  "python tests/ob1_model.py",
+  "python tests/ob1_check.py",
+  "python tests/ob1_artefacts.py",
+  "uv run --no-project --with numpy==2.3.3 python tests/ob1_calibration.py",
+]
+
+[tasks.bench]
+description = "Count ColdFire instructions using the simulator's patched Unicorn"
+run = "python tools/tasks.py bench"
+
+[tasks."test:emu"]
+description = "Check freshly built firmware in the emulator against stock"
+depends = ["firmware"]
+run = "python tools/tasks.py test:emu"
+
+[tasks.firmware]
+description = "Build custom firmware for ELEKLOADER_STOCK with version FW_VERSION"
+depends = ["build"]
+run = "python tools/tasks.py firmware"
+
+[tasks.emu]
+description = "Build custom firmware and open its simulator panel, keeping saved sessions"
+depends = ["firmware"]
+run = "python tools/tasks.py emu"
+raw = true
+
+[tasks.release]
+description = "Build, test and release the .elemod for each OS on GitHub"
+depends = ["DIGIFILTER_BUILD_OS=all build", "test"]
+run = "python tools/tasks.py release"

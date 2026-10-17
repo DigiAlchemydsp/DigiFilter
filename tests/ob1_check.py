@@ -38,8 +38,11 @@ BLOCKS = 256                    # 8192 samples
 
 
 def build():
-    lib = os.path.join(tempfile.mkdtemp(), 'ob1_vcf.so')
-    subprocess.check_call(['cc', '-O2', '-shared', '-fPIC', '-Wall', '-Wextra', '-I', ROOT,
+    windows = sys.platform == 'win32'
+    lib = os.path.join(tempfile.mkdtemp(), 'ob1_vcf.dll' if windows else 'ob1_vcf.so')
+    compiler = os.environ.get('CC', 'gcc' if windows else 'cc')
+    flags = [] if windows else ['-fPIC']
+    subprocess.check_call([compiler, '-O2', '-shared', *flags, '-Wall', '-Wextra', '-I', ROOT,
                            os.path.join(ROOT, 'ob1_vcf.c'), '-o', lib])
     so = ctypes.CDLL(lib)
     so.ob1_vcf_run.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int),

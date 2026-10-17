@@ -10,6 +10,9 @@ work/
 # Python
 __pycache__/
 *.pyc
+.venv/
+.digiemu/
+mise.local.toml
 
 # Editors / OS
 *.swp
