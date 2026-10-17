@@ -109,7 +109,7 @@ static inline int32 fbsat(int32 y)
  * 8 samples, each with the coefficients at its middle on the line from a (the last block's end) to b (this
  * one's), as svf_run ramps: a cutoff moving each block doesn't step. */
 static inline __attribute__((always_inline)) void loop(int32 *s, int32 *buf, const struct ob1_coef *a,
-                                                         const struct ob1_coef *b, const int linear, const int two)
+                                                         const struct ob1_coef *b, const int linear, const int two, const int zero)
 {
     int32 s0 = s[0] + (linear || b->k8 < SEED_K8 ? 0 : seed), s1 = s[1], s2 = s[2], s3 = s[3];
     int32 dG = (b->G - a->G) >> 3, dk = (b->k8 - a->k8) >> 3, dr = (b->r - a->r) >> 3, dg = (b->g4r - a->g4r) >> 3;
@@ -119,12 +119,16 @@ static inline __attribute__((always_inline)) void loop(int32 *s, int32 *buf, con
         int32 r = a->r + dr * (2 * j + 1), g4r = a->g4r + dg * (2 * j + 1), omg = 0x7fffffff - G;
         for (i = 8 * j; i < 8 * j + 8; i++) {
             int32 S, e, u, w, x = buf[i] >> IN_SHIFT, y1, y2, y3, y4, y;
-            S = fmul(omg, fmul(G, fmul(G, fmul(G, s0) + s1) + s2) + s3);  /* Horner: 4 multiplies, not 7 */
-            e = x - (fmul(k8, S) << 3);                              /* x - k S */
-            if (linear)
-                u = fmul(e, r) << 1;                                 /* the loop's input, (x - k S) / (1 + k G^4) */
-            else                                                     /* y4's linear estimate through U28 */
-                u = x - (fmul(k8, fbsat(fmul(g4r, e) + S)) << 3);
+            if (zero) {
+                u = x;
+            } else {
+                S = fmul(omg, fmul(G, fmul(G, fmul(G, s0) + s1) + s2) + s3);  /* Horner: 4 multiplies, not 7 */
+                e = x - (fmul(k8, S) << 3);                              /* x - k S */
+                if (linear)
+                    u = fmul(e, r) << 1;                                 /* the loop's input, (x - k S) / (1 + k G^4) */
+                else                                                     /* y4's linear estimate through U28 */
+                    u = x - (fmul(k8, fbsat(fmul(g4r, e) + S)) << 3);
+            }
             w = fmul(G, u - s0); y1 = w + s0; s0 = y1 + w;
             w = fmul(G, y1 - s1); y2 = w + s1; s1 = y2 + w;
             w = fmul(G, y2 - s2); y3 = w + s2; s2 = y3 + w;
@@ -154,10 +158,13 @@ void ob1_vcf_run(int tap, int fi8, int qi, int *buf, int v)
     p->fresh = 0;
     lcg = lcg * 1664525u + 1013904223u;                          /* a random sign each block */
     seed = lcg & 0x80000000u ? -SEED : SEED;
-    if (linear)
-        two ? loop(p->s, buf, &a, &b, 1, 1) : loop(p->s, buf, &a, &b, 1, 0);
+    /* Both endpoints must be zero: a zero destination can still have a feedback ramp. */
+    if (!linear && a.k8 == 0 && b.k8 == 0)
+        two ? loop(p->s, buf, &a, &b, 0, 1, 1) : loop(p->s, buf, &a, &b, 0, 0, 1);
+    else if (linear)
+        two ? loop(p->s, buf, &a, &b, 1, 1, 0) : loop(p->s, buf, &a, &b, 1, 0, 0);
     else
-        two ? loop(p->s, buf, &a, &b, 0, 1) : loop(p->s, buf, &a, &b, 0, 0);
+        two ? loop(p->s, buf, &a, &b, 0, 1, 0) : loop(p->s, buf, &a, &b, 0, 0, 0);
 #ifdef __mcoldfire__
     __asm__ volatile("move.l %0,%%macsr" :: "d"(macsr));
 #endif
