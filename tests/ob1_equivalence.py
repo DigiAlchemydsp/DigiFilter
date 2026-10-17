@@ -144,6 +144,20 @@ def main():
                 assert before == after, ('Output differs', blocks, tap, cutoff, qi, voice)
                 assert old.state() == new.state(), ('DSP state differs', blocks, tap, cutoff, qi, voice)
                 blocks += 1
+        # A zero destination is not enough: preserve the first nonzero-to-zero ramp,
+        # then compare the fast path with live residual states and changing cutoff.
+        for voice in range(8):
+            old.reset(voice)
+            new.reset(voice)
+            history = [127] * 64 + [0] * 64 + [1] * 8 + [0] * 8 + [81] * 64 + [0] * 64
+            for block, qi in enumerate(history):
+                tap = 2 if (block // 16) % 2 else 4
+                cutoff = (32 << 8) + block % 256
+                values = [2**31 - 1] + [0] * 31 if block == 0 else [0] * 32
+                assert old.run(tap, cutoff, qi, values, voice) == new.run(tap, cutoff, qi, values, voice), (
+                    'Zero-feedback transition output', voice, block, qi)
+                assert old.state() == new.state(), ('Zero-feedback transition state', voice, block, qi)
+                blocks += 1
         print(f'PASS: {blocks} blocks, {blocks * 32} samples, exact output and all original DSP state; '
               f'{"ColdFire" if args.coldfire else "native"} versus {args.baseline}')
 
