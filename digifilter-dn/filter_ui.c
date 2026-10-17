@@ -457,14 +457,33 @@ static void page2_setup(void)
 extern int digifilter_dn_voice;
 extern int digifilter_dn_buf;
 static int dn_prev_type[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static int dn_sounding[8];
 
 void digifilter_dn_filt(void)
 {
     int voice = digifilter_dn_voice;
     int32 *buf = (int32 *)digifilter_dn_buf;
-    int type, fi;
+    int type, fi, i;
     if (voice < 0 || voice >= 8 || !buf)
         return;
+    /* Per-voice cost guard: the render dispatches all 8 voices every block,
+     * idle or not, and an idle voice hands us 32 zero samples. Running the
+     * filter on that is pure wasted work, and 8x of it overruns the audio
+     * block budget (all 8 idle voices on an OB type froze the panel with an
+     * empty pattern). Skip silent voices and drop their state once, so the
+     * next note starts clean and a 4-voice chord only pays for 4 voices. */
+    for (i = 0; i < 32; i++)
+        if (buf[i])
+            break;
+    if (i == 32) {
+        if (dn_sounding[voice]) {
+            df_reset(voice);
+            ob1_vcf_reset(voice);
+            dn_sounding[voice] = 0;
+        }
+        return;
+    }
+    dn_sounding[voice] = 1;
     type = (FW_VOICE_PARAM(voice, FS_TYPE) >> 8) & 0xff;
     if (type < FM_BP || type > FM_OB2)
         return;

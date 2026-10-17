@@ -144,5 +144,31 @@ override SYN ids vs ours `core_params` 182/183 + filter TYPE values).
   acceptable, curve rectangular open.
 - Pending: `fwcheck` timing/margins, 1x screenshots, hardware photos,
   locks/polyphony/edge cases (TYPE 4..9 + 182/183, LFO/MIDI CC -1, presets,
-  8-voice OB cost, mode-change clicks). 48kHz + slots saved ASSUME (verify
-  save/reload + rate on device, like DT HANDOFF open items).
+  8-voice OB cost (see §8), mode-change clicks). 48kHz + slots saved ASSUME
+  (verify save/reload + rate on device, like DT HANDOFF open items).
+
+## 8. Per-voice cost guard — OB freeze fixed (0.1h)
+
+`VOICES_LOOP` dispatches all 8 voices every block, sounding or not, and an
+idle voice hands the filter a 32-word **all-zero** block (confirmed with an
+empty pattern: 1199/1199 blocks zero for every voice; `fw_voice_len` also 0).
+Running new DSP on that silence is pure waste, and 8× of it overran the audio
+block: with TYPE OB4/OB2 and an empty pattern the render dropped to ~1428
+blocks/s and PIT0/PIT2/PIT3/DTIM3 **all froze** (audio ISR starves the OS
+timers; pattern/transport irrelevant, the emptiness is the worst case). Forced
+N-voice boundary (voices ≥ N → stock FILTER): ≤6 sounding OB voices healthy,
+7 marginal, 8 fall off.
+
+Fix is adapter-only (no OB change): `digifilter_dn_filt` first scans the
+voice's 32-word block; if all zero it drops the voice's DSP state once
+(`df_reset` + `ob1_vcf_reset`, tracked by `dn_sounding[8]`) and returns
+without running the DSP. Type-independent; sound with a sounding voice is
+unchanged (the stock filter's own per-voice "active" mask arg is 0 in normal
+playback, so it is not a usable gate). Earlier `digifilter_dn_filt` address is
+unchanged (`0x43ec2896` both OS).
+
+Verified in digiemu (fresh hash-matched snapshots, 64M ips): empty-pattern OB4
+→ `ob1_vcf_run` called **0** times (was ~3424), PIT0/PIT2/DTIM3 healthy,
+1500 blocks/s; 4 sounding voices → ~1800 OB calls, still healthy; 8 sounding
+voices still overload (intrinsic OB cost, per-voice work unaffected). So a
+4-note chord on one track (4 voices) is fixed.
