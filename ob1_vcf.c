@@ -101,7 +101,8 @@ static inline int32 fbsat(int32 y)
     if (z <= -32768)
         return -KF4_5;
     z2 = (z * z) >> 15;                         /* z^2, Q15 */
-    return y - fmul(y, z2 * 21845 - ((z2 * z2) >> 15) * 8738);    /* y (1 - z^2/3 + 2 z^4/15), Q31: 2^16/3, 2^17/15 */
+    /* Both integer weights share 4369; factor after the existing Q15 truncation. */
+    return y - fmul(y, (5 * z2 - 2 * ((z2 * z2) >> 15)) * 4369);
 }
 
 /* The sample loop, inlined into one copy per (linear, two): gcc then tests neither per sample. Four sub-blocks of
