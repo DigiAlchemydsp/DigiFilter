@@ -129,6 +129,106 @@ comb's interpolation and feedback each use a single 32×32 multiply.
 
 ## Building
 
+The usual development commands live in [`mise.toml`](mise.toml). Use
+PowerShell on Windows and a shell on Linux/macOS; Windows tasks do not need
+WSL or Bash.
+
+### Setup
+
+Install [mise](https://mise.jdx.dev/getting-started.html) and Git first.
+Native build prerequisites depend on your OS:
+
+| OS | prerequisites |
+|---|---|
+| macOS | Xcode Command Line Tools (`xcode-select --install`). Bootstrap installs the m68k toolchain through mise's Homebrew package support on Apple Silicon; Intel Macs need an existing m68k toolchain on PATH. |
+| Linux | A native C/C++ toolchain, Make and `shasum` (Perl Digest::SHA). Bootstrap installs `build-essential` on Debian/Ubuntu and the m68k toolchain through mise's Homebrew package support. On other distributions install the native prerequisites with your package manager. |
+| Windows | Visual Studio 2022 C++ Build Tools for the simulator's patched Unicorn, and native MinGW-w64 GCC for host DSP tests. Set `CC` to the native GCC executable if it is not named `gcc` on PATH. MSVC cannot compile the DSP's GNU C extensions. Mise installs the m68k compiler and binutils automatically. |
+
+From a Git checkout:
+
+```sh
+mise trust
+mise bootstrap
+```
+
+This installs Python 3.12, uv, CMake and GitHub CLI, fetches the pinned
+`vendor/elekloader` and `vendor/digiemu` submodules, and builds digiemu's
+patched Unicorn in its own Python environment. Bootstrap uses the upstream
+PowerShell installer on Windows and shell installer on Unix. It is safe to
+repeat: a compatible Unicorn is kept. Normal simulator/benchmark tasks use
+that environment directly, without syncing over its patched library.
+
+On Windows, mise downloads the [GCC 14.2.0 toolchain bundle](https://github.com/iratahack/m68k-elf-gcc/releases/tag/v14.2.0_latest),
+verifies its pinned SHA-256 and adds its `m68k-elf-` compiler and binutils to
+the task PATH. No manual cross-toolchain installation or PATH changes are needed.
+
+Supply your own official `firmware/Digitakt_OS1.54.syx`. Builds default to
+OS 1.54; set `DIGIFILTER_BUILD_OS=1.53` to build that OS or `all` for both,
+supplying the matching stock files. Releases explicitly build both versions.
+`check`, `firmware`, `emu` and `test:emu` depend on the build. Firmware and
+generated outputs are ignored by Git.
+
+### Tasks
+
+| command | result |
+|---|---|
+| `mise run build` | Build matching core and DigiFilter elemods for the selected OS under `out/os<OS>/` (default 1.54). |
+| `mise run check` | Depend on `build`, then lint DigiFilter against its core and check that they combine. |
+| `mise run test` | Run the workflow tests, floating-point models, native kernel, artefact and measured calibration checks. Calibration uses an isolated NumPy environment. |
+| `mise run test:emu` | Build firmware, then check its cold boot and scripted runtime against stock firmware in the headless emulator. Write the report to `out/os<OS>/test-emu/report.json`. |
+| `mise run bench` | Run the existing per-mode ColdFire instruction benchmark with patched Unicorn. |
+| `mise run firmware` | Build core and DigiFilter for `ELEKLOADER_STOCK`, then write `out/os<OS>/Digitakt_custom.syx`. |
+| `mise run emu` | Build that firmware, set it up in digiemu and open its panel. |
+| `mise run release` | Build and test, require clean source pushed to `origin/master`, then publish both `.elemod` files on GitHub at the current commit with generated release notes. |
+
+The simulator's task chain is `emu → firmware → build`: mise builds the
+mods, patches the selected stock OS, then opens its panel.
+
+`test:emu → firmware → build` uses the same selected stock OS and runs
+digiemu's `emu.fwcheck` with boot, runtime and emulated audio-deadline checks
+enabled. Run `mise bootstrap` first to install patched Unicorn. Each run
+creates fresh test state under `out/os<OS>/test-emu/`, separate from saved
+interactive simulator sessions. The report includes a stock comparison;
+screen/audio differences are reported for inspection, not automatically
+treated as failures. This task does not replace the focused DSP/UI tests.
+
+The native tests and instruction benchmark do not establish firmware
+integration, physical hardware behavior or real-time timing headroom.
+The simulator stores each firmware build separately under `.digiemu/`;
+old builds and their saved sessions are kept. The task accepts the custom
+firmware through digiemu's `--add --yes` path. It never resets an existing
+session. No task flashes hardware.
+
+`firmware` and `emu` default to OS 1.54 and the four-character display
+version `DFlt`. Set local preferences in ignored `mise.local.toml`:
+
+```toml
+[env]
+DIGIFILTER_BUILD_OS = "1.53"
+ELEKLOADER_STOCK = "firmware/Digitakt_OS1.53.syx"
+FW_VERSION = "DFlt"
+# Optional: a different compiler prefix or a full prefix path, without quotes inside the value.
+# ELEKLOADER_CROSS = "C:/Cross Tools/m68k-elf/bin/m68k-elf-"
+# CC = "C:/msys64/ucrt64/bin/gcc.exe"
+```
+
+Environment variables work too. For example, in PowerShell:
+
+```powershell
+$env:ELEKLOADER_STOCK = 'firmware/Digitakt_OS1.53.syx'
+$env:DIGIFILTER_BUILD_OS = '1.53'
+$env:FW_VERSION = 'DFlt'
+mise run emu
+```
+
+For a release, authenticate `gh`, commit and push the changes to `origin/master`,
+then run `mise run release`. Like OB-1, the task checks that the working tree
+is clean and that HEAD has no commits ahead of `origin/master`. It uses gh's
+default repository and publishes the two elemods with tag `v<mod.json version>`
+and GitHub-generated notes. Version changes remain a separate release decision.
+
+### Manual SDK build
+
 The mod builds for **OS 1.53 and OS 1.54** from one source tree: `mod.json`
 carries a `"ports": {"1.54": …}` block (the moved firmware addresses and the
 site bytes, generated with `tools/port_os.py` from the DigiFilter ecosystem) and
