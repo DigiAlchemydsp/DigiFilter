@@ -168,6 +168,14 @@ supplying the matching stock files. Releases explicitly build both versions.
 `check`, `firmware`, `emu` and `test:emu` depend on the build. Firmware and
 generated outputs are ignored by Git.
 
+GitHub Actions runs `mise run check`, `mise run test` and `mise run test:emu`
+on macOS 26, Windows Server 2022 and Ubuntu 26.04. CI runs the full bootstrap
+to install patched Unicorn, downloads stock OS 1.54 from Elektron and verifies
+its SHA-256. A job after the matrix compares the generated firmware SHA-256
+from all three runners and fails if any checksum is missing or different.
+CI uses the same OS 1.54 default as local builds and keeps firmware and
+generated files out of uploaded artifacts.
+
 ### Tasks
 
 | command | result |

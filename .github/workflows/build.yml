@@ -1,0 +1,84 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    outputs:
+      linux: ${{ steps.firmware_sha.outputs.Linux }}
+      macos: ${{ steps.firmware_sha.outputs.macOS }}
+      windows: ${{ steps.firmware_sha.outputs.Windows }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, macos-26, windows-2022]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: jdx/mise-action@v5
+        with:
+          bootstrap: true
+      - name: Download stock OS 1.54
+        run: curl --fail --location --retry 3 --output Digitakt_OS1.54_dist.zip https://www.elektron.se/wp-content/uploads/2026/10/Digitakt_OS1.54_dist.zip
+      - name: Verify and extract stock OS
+        shell: mise exec -- python {0}
+        run: |
+          import hashlib
+          from pathlib import Path
+          import zipfile
+
+          with zipfile.ZipFile("Digitakt_OS1.54_dist.zip") as archive:
+              stock = archive.read("Digitakt_OS1.54.syx")
+          expected = "f78ba80fa7b1da5fb0e1ff61ad61e9e71aafe79f4364fc49679f3651353e3cf6"
+          if hashlib.sha256(stock).hexdigest() != expected:
+              raise ValueError("Unexpected stock OS 1.54 checksum")
+          Path("firmware").mkdir(exist_ok=True)
+          Path("firmware/Digitakt_OS1.54.syx").write_bytes(stock)
+      - name: Build, lint and check composition
+        run: mise run check
+      - name: Test
+        run: mise run test
+      - name: Emulator test
+        run: mise run test:emu
+      - name: Hash firmware
+        id: firmware_sha
+        shell: mise exec -- python {0}
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+
+          with Path("out/os1.54/Digitakt_custom.syx").open("rb") as firmware:
+              digest = hashlib.file_digest(firmware, "sha256").hexdigest()
+          print(f"{os.environ['RUNNER_OS']}: {digest}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"{os.environ['RUNNER_OS']}={digest}", file=output)
+
+  compare-firmware:
+    name: Compare firmware checksums
+    needs: check
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Require identical firmware on all operating systems
+        env:
+          LINUX_SHA: ${{ needs.check.outputs.linux }}
+          MACOS_SHA: ${{ needs.check.outputs.macos }}
+          WINDOWS_SHA: ${{ needs.check.outputs.windows }}
+        run: |
+          printf 'Linux: %s\nmacOS: %s\nWindows: %s\n' "$LINUX_SHA" "$MACOS_SHA" "$WINDOWS_SHA"
+          if [[ -n "$LINUX_SHA" && "$LINUX_SHA" == "$MACOS_SHA" && "$LINUX_SHA" == "$WINDOWS_SHA" ]]; then
+            echo "Firmware SHA-256 matches on all three operating systems."
+          else
+            echo "::error::Firmware SHA-256 is missing or differs between operating systems"
+            exit 1
+          fi
