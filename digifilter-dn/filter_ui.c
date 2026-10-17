@@ -3,7 +3,8 @@
  *
  * Thin port (5 files, shared DSP via ../, no copies): this file holds DN
  * integration (digifilter_dn_filt: dispatcher globals + fw_voice_params slots
- * 54 TYPE/55 FREQ/56 RESO/65 HARM/26 DAMP, TYPE base 4, base FREQ only) plus UI
+ * 54 TYPE/55 FREQ/56 RESO/65 HARM/26 DAMP, TYPE base 4, FREQ via the render's
+ * envelope-modulated cutoff) plus UI
  * (FLTR p1 curve/glyphs, p2 HARM/DAMP dials, tick/enc/key). DSP lives in
  * ../df_dsp.c (SVF/comb) + ../filter_dsp.s (EMAC) + ../ob1_vcf.c (ladder);
  * tables via ../filter_tables.h/../ob1_tables.h.
@@ -13,8 +14,8 @@
  * dials (86,42 C HARM / 86,15 G DAMP, ENV-style) for COMB/TRASH; p2 C/G tick
  * [35,0,182,0,36,37,183,0] for COMB/TRASH else stock (DEL/BASE/WIDTH stock
  * always). HARM/DAMP params 182/183 group Filter slots 65/26 (savable ASSUME).
- * BASE/WIDTH slots 62/63 stock always. Envelope TODO (base FREQ only). Slots
- * 65/26 + 48kHz ASSUME (verify on device).
+ * BASE/WIDTH slots 62/63 stock always. FREQ is the dispatcher's captured
+ * render cutoff (ENV-modulated). Slots 65/26 + 48kHz ASSUME (verify on device).
  *
  * Gated on firmware state (active TYPE, FLTR p1 list[pos]==6, brain
  * bottom==top, toast yield 90 ticks on chorded RECORD/STOP/PLAY). Tick
@@ -448,14 +449,17 @@ static void page2_setup(void)
 
 /* ---- per-voice filter (DN integration, no DSP state here) ----
  * The render calls the per-voice filter through a5; the dispatcher
- * (filter_glue.s) points a5 here for TYPE 4..9. Reads voice/buffer from
- * dispatcher globals and FREQ/RESO/HARM/DAMP from fw_voice_params (render's
+ * (filter_glue.s) points a5 here for TYPE 4..9. Reads voice/buffer/cutoff from
+ * dispatcher globals and RESO/HARM/DAMP from fw_voice_params (render's
  * copy, locks included). Ignores the stock stack args. Runs shared DSP
  * (../df_dsp.c + ../filter_dsp.s + ../ob1_vcf.c) in place; stock types never
- * reach here. Base FREQ only, no envelope (TODO for all new types). DSP state
- * lives in the shared core; this file keeps only the mode-change detector. */
+ * reach here. FREQ is the render's envelope-modulated cutoff (captured by the
+ * dispatcher), so ENV/ADSR modulate all new types like the stock ones. DSP
+ * state lives in the shared core; this file keeps only the mode-change
+ * detector. */
 extern int digifilter_dn_voice;
 extern int digifilter_dn_buf;
+extern int digifilter_dn_cut;
 static int dn_prev_type[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 static int dn_sounding[8];
 
@@ -463,7 +467,7 @@ void digifilter_dn_filt(void)
 {
     int voice = digifilter_dn_voice;
     int32 *buf = (int32 *)digifilter_dn_buf;
-    int type, fi, i;
+    int cut, type, fi, i;
     if (voice < 0 || voice >= 8 || !buf)
         return;
     /* Per-voice cost guard: the render dispatches all 8 voices every block,
@@ -487,7 +491,14 @@ void digifilter_dn_filt(void)
     type = (FW_VOICE_PARAM(voice, FS_TYPE) >> 8) & 0xff;
     if (type < FM_BP || type > FM_OB2)
         return;
-    fi = df_clampi((FW_VOICE_PARAM(voice, FS_FREQ) >> 8) & 0xff, 0, 127);
+    /* The render's own cutoff for this voice/block: FREQ (slot 55) plus the
+     * filter envelope (ENV slot 57 and the voice's envelope level), clamped
+     * to 0..0x7f000000 and captured by the dispatcher in d7. It is what the
+     * stock filter consumes, so the new types use it too and ENV modulates
+     * them exactly as it does LP/HP. fi (0..127) and fi8 (0..127<<8) are the
+     * same scales the shared DSP already takes. */
+    cut = digifilter_dn_cut;
+    fi = df_clampi((cut >> 24) & 0xff, 0, 127);
     if (dn_prev_type[voice] != type) {
         df_reset(voice);
         ob1_vcf_reset(voice);
@@ -504,7 +515,7 @@ void digifilter_dn_filt(void)
         int div = (type == FM_COMB) ? 1 : 2;
         df_comb_run(buf, 32, fi, fb, voice, div, hdiv, damp);
     } else {
-        int fi8 = FW_VOICE_PARAM(voice, FS_FREQ);
+        int fi8 = df_clampi(cut >> 16, 0, 127 << 8);
         int qio = df_clampi((FW_VOICE_PARAM(voice, FS_RESO) >> 8) & 0xff, 0, 127);
         ob1_vcf_run((type == FM_OB4) ? OB1_TAP4 : OB1_TAP2, fi8, qio, (int *)buf, voice);
     }

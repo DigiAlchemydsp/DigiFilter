@@ -73,7 +73,8 @@ layout `9+79v+k` confirmed in `core3.h`/`core3.inc` (`SKIP 18, STRIDE
 158`).
 
 DSP reads HARM slot 65 / DAMP slot 26 (plain at defaults). BASE/WIDTH slots
-62/63 stock always. Envelope TODO all new (base FREQ only).
+62/63 stock always. FREQ is d7 (`0x400983c6`'s ENV-modulated result, stashed
+by the dispatcher); RESO slot 56. Envelope applied all new (see §5).
 
 ## 4. FLTR pages — SOLVED [S]
 
@@ -96,16 +97,30 @@ Curve in 20..71, glyphs with full-outer clear in 78..92, dials (86,42 C HARM /
 86,15 G DAMP, ENV-style) for COMB/TRASH. Layouts same as DT per feedback
 (centre 85/45.5).
 
-## 5. Envelope / FREQ / RESO mapping — OPEN [L]
+## 5. Envelope / FREQ / RESO mapping — SOLVED [S], live [L]
 
-Base FREQ only (`fi = FREQ>>8`), `qi = RESO>>11` (BP/BP2, capped 13/15, BP2
-halves), `fb = RESO>>8` (COMB/TRASH → 0..31/32). Envelope TODO all new.
-Digitakt `cutoff_index` envelope (`FREQ<<16 + (-env)*(ENV-0x4000<<17)>>31`)
-not yet ported — DN envelope level address/formula unknown (DT was
-`0x4199df58+v*12`, accessor `0x40073412`, stage `0x40073304`). Search DN
-for `0x4009...` envelope stage + `ENV slot 57` readers. Also confirm 48 kHz
-(`COMB_DELAY = round(48000/HZ)`) ASSUME and SVF/comb cost vs stock DN filter
-(DT: stock ~2400, BP ~2800, COMB ~1750 per voice/block).
+The render computes each voice's cutoff before calling the filter: inside the
+voices' loop it calls `0x400983c6` (`0x400983e6` 1.44) with (voice, a per-voice
+value, `a2+0x50`) and keeps the result in **d7**. That routine reads FREQ
+(`fw_voice_params` slot 55 via `a0@(2)`), ENV (slot 57 via `a0@(6)`), a key/vel
+term and the voice's filter-envelope level (`0x41391784 + 12*v` via
+`0x400990ae`), and returns `clamp(FREQ<<16 + keyterm + (ENV-0x4000)<<17 *
+envlevel * 0x483244b3, 0, 0x7f000000)` — FREQ plus the filter envelope. The
+render then stores d7 into the voice's 16-byte block (`a3@(0)`) right after the
+filter call, and the stock filter consumes it (with `a0@(4)`, the raw value).
+
+So base-FREQ-only was the bug: `digifilter_dn_filt` read slot 55 directly and
+never saw ENV. The fix is adapter-only: the dispatcher (`filter_glue.s`) stashes
+**d7** in `digifilter_dn_cut` at the dispatch site (it was already there, before
+the render overwrites d0 with the buffer), and `digifilter_dn_filt` derives
+`fi = cut>>24` (0..127, SVF/comb) and `fi8 = cut>>16` (0..127<<8, OB) from it.
+`ENV = 0x4000` (default) is zero modulation, so the mapping is unchanged then.
+
+`fi`/`fi8` for all new types now track ENV/ADSR exactly as the stock types.
+RESO still comes straight from slot 56: `qi = RESO>>11` (BP/BP2, capped 13/15,
+BP2 halves), `fb = RESO>>8` (COMB/TRASH → 0..31/32). 48 kHz
+(`COMB_DELAY = round(48000/HZ)`) ASSUME; SVF/comb cost vs stock DN filter (DT:
+stock ~2400, BP ~2800, COMB ~1750 per voice/block) verified in digiemu (§8).
 
 ## 6. Sites (0.1h, both OS, stock bytes verified via `patch --check`)
 

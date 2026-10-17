@@ -23,9 +23,10 @@ reimplements a stock mode.
 
 ## Status — 0.1h+thin
 
-- **Audio:** BP/BP2 SVF + COMB/TRASH combs + OB4/OB2 ladder/2-pole. FREQ/RESO
-  (+ HARM/DAMP slots 65/26 for COMB/TRASH). Base FREQ only for new (envelope
-  TODO all new). ASSUME 48 kHz + slots savable (verify reload).
+- **Audio:** BP/BP2 SVF + COMB/TRASH combs + OB4/OB2 ladder/2-pole. FREQ (the
+  render's envelope-modulated cutoff) / RESO (+ HARM/DAMP slots 65/26 for
+  COMB/TRASH). ENV/ADSR modulate all new types like stock. ASSUME 48 kHz +
+  slots savable (verify reload).
 - **TYPE list to 10** (0..9) with names. G turns past `LP4` to `OB2`.
   (0.1b list to 8/10, 0.1a audio+names.)
 - **TYPE icons:** bell/wider/teeth/can/lowpass for 4..9 (full-outer clear in
@@ -46,12 +47,11 @@ reimplements a stock mode.
 
 ### Known issues / TODO (next)
 
-- **Filter envelope not yet modulated for new types (base FREQ only).**
-  Stock types keep envelope. TODO all new (DN envelope level/formula open).
 - **Verify on device:** TYPE names/icons/curve for 4..9, HARM/DAMP dials
   (0.1g pending; 0.1f showed labels with empty dotted), audio
   BP/BP2/COMB/TRASH + OB (0.1h built after screenshots, untested), stock
-  byte-identity 0..3, locks/polyphony/edge cases (TYPE 4..9 + 182/183,
+  byte-identity 0..3, ENV/ADSR on all new types (emulator-verified, see
+  RE_NOTES_DN §5/§8), locks/polyphony/edge cases (TYPE 4..9 + 182/183,
   LFO/MIDI CC -1, presets, 8-voice OB cost, mode-change clicks), photos.
   Then `fwcheck` timing/margins, 1x screenshots, hardware photos.
 - Slots 65/26 savable ASSUME + 48kHz ASSUME (verify save/reload + rate).
@@ -61,7 +61,8 @@ reimplements a stock mode.
 - **FREQ (E on page 1)** cutoff / comb pitch; **RESO (F)** resonance, and for
   COMB/TRASH the comb **feedback** (0..127, up to 31/32, metallic near
   self-oscillation, saturated). **TYPE (G)** picks the mode. **ENV (H)** and
-  the envelope ADSR do nothing for the new modes yet (see above).
+  the envelope ADSR modulate FREQ for the new modes too, exactly as the stock
+  types (the render's own envelope-modulated cutoff drives them).
 - Second page: `DEL/BASE/WIDTH` stock always (base filter accessible). For
   COMB/TRASH, free **C/G** add **HARM/DAMP** (slots 65/26, divider 1..4 /
   0..127 texts, ENV-style dials). OB uses FREQ/RESO (no HARM/DAMP, p2 stock).
