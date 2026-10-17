@@ -61,7 +61,7 @@ typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour
 /* the active track and the pattern's kit (RE_NOTES): kit + 0x20 + t*0xa2 is the
  * track's sound block, slot s a word at +0x14 + 2s. */
 #define UI_KIT (*(unsigned char *volatile *)F_4199dc44)
-#define ACTIVE_TRACK (*(int *volatile *)F_4197b6b4)
+#define ACTIVE_TRACK (*(volatile int *)F_4197b6b4)
 #define FSLOT(kit, t, s) ((int)(*(unsigned short *)((kit) + 0x20 + (t) * 0xa2 + 0x14 + 2 * (s))))
 #define FS_TYPE 0x19
 #define FS_FREQ 0x1a
