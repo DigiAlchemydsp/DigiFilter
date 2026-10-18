@@ -54,6 +54,8 @@ OB4/OB2). See [RE_NOTES.md](RE_NOTES.md).
 
 Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1). **1.1a** was
 tested on hardware (Digitakt mk1) on both **OS 1.53** and **OS 1.54**: PASS.
+**1.1b** is emulator-verified (bit-exact for BP/BP2 and COMB/TRASH; the OB
+saturation table is bounded at ~-100 dBFS); hardware testing is pending.
 
 Everything in this repo builds (`BUILT`), lints against `core` and combines with
 `digihealth` (`OK: the mods combine`).
@@ -122,8 +124,9 @@ Per voice per render block (measured in digiemu / `tests/df_bench.py`), TYPE 1
 (stock) costs ~2400 instructions; **BP/BP2 ~1070 with static knobs and ~1640
 while the cutoff is swept** (the coefficients are cached and only recomputed when
 the cutoff/resonance actually move, and the only division — the SVF's `a1` — is a
-precomputed table, so no software division runs at all); COMB/TRASH ~1730; OB4/OB2
-~1390-1425. So BP/BP2 are now cheaper than the stock filter even while the cutoff
+precomputed table, so no software division runs at all); COMB/TRASH ~1690; OB4/OB2
+~3200 at RESO 64 (~1390 with the feedback at zero). So BP/BP2 are now cheaper
+than the stock filter even while the cutoff
 moves, and every mode stays within the stock filter's own order. The OB-1 ladder
 computes its coefficients at the block's ends and ramps between them, and the
 comb's interpolation and feedback each use a single 32×32 multiply.
@@ -146,8 +149,8 @@ export ELEKLOADER_CROSS=m68k-elf-
 export PYTHONPATH="<elekloader checkout>"
 
 python -m elekloader.sdk.build . --stock <Digitakt_OS1.53.syx>
-python -m elekloader.lint  out/digifilter-1.1a.elemod --stock <Digitakt_OS1.53.syx> --with <core.elemod>
-python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core.elemod> --mod out/digifilter-1.1a.elemod --out custom.syx --version 2.0t --check
+python -m elekloader.lint  out/digifilter-1.1b.elemod --stock <Digitakt_OS1.53.syx> --with <core.elemod>
+python -m elekloader.patch --stock <Digitakt_OS1.53.syx> --mod <core.elemod> --mod out/digifilter-1.1b.elemod --out custom.syx --version 2.0t --check
 ```
 
 That must print `BUILT`, then `OK: links as core …`, then `OK: the mods
@@ -170,11 +173,14 @@ third site is chosen so this mod does **not** overlap digihealth 1.0.
 | `filter_glue.s` | the raw site entry points (labels + the per-voice dispatcher) |
 | `filter_ui.c` | the `ev_draw` handler (`digifilter_draw`: response curve, TYPE glyph, page-2 dials) and the page-2 `ev_tick` re-map (`digifilter_page2_sync`) |
 | `filter_tables.h` | `g`, `k`, frequency and comb-delay tables |
-| `ob1_vcf.c`, `ob1_vcf.h`, `ob1_tables.h` | OB4/OB2: the OB-1 ladder and its tables; its model, checks, SPICE circuit and digiemu tests are `tests/ob1_*`, `tests/spice/` and `tests/digiemu_filter_ob1_*` ([docs/ob1.md](docs/ob1.md)) |
+| `ob1_vcf.c`, `ob1_vcf.h`, `ob1_tables.h`, `ob1_fbsat_table.h` | OB4/OB2: the OB-1 ladder, its tables and the interpolated saturation table; its model, checks, SPICE circuit and digiemu tests are `tests/ob1_*`, `tests/spice/` and `tests/digiemu_filter_ob1_*` ([docs/ob1.md](docs/ob1.md)) |
 | `tests/filter_model.py` | floating-point reference (`svf_block`, `comb_gain`) |
-| `tests/df_bench.py`, `tests/df_bench.c` | per-voice instructions-per-block bench for every mode (Unicorn) |
+| `tests/df_bench.py`, `tests/df_bench.c` | per-voice instructions and (with digiemu) cycle bench for every mode |
+| `tests/comb_equivalence.py` | COMB/TRASH output and delay-line state versus a Git baseline (ColdFire) |
+| `tests/ob1_table_accuracy.py` | the interpolated fbsat table's error versus the exact polynomial (ColdFire) |
 | `tests/digiemu_filter_*.py` | headless digiemu traces/tests (need a digiemu checkout) |
 | `tools/disas.py` | disassembly helper (`m68k-elf-objdump -m m68k:cfv4e`) |
+| `tools/gen_ob1_fbsat.py` | generates `ob1_fbsat_table.h` |
 | `tools/re_locate.py`, `tools/emu_filter.py` | early image/unicorn helpers |
 | `RE_NOTES.md` | the reverse-engineering findings (and the 1.1a optimization ledger, §13) |
 | `HANDOFF-OPTIMIZATION.md` | the 1.1a performance pass: what changed, how measured and verified |
@@ -188,8 +194,15 @@ measured calibration targets and focused ColdFire/firmware simulator checks.
 # floating-point model self-test (no toolchain needed)
 python tests/filter_model.py
 
-# per-voice cost bench (needs m68k-elf-gcc + digiemu's Unicorn):
+# per-voice cost bench (needs m68k-elf-gcc + digiemu's Unicorn; from a
+# digiemu checkout it also reports MCF54418 cycles via emu.cftiming):
 python tests/df_bench.py
+
+# bit-exact COMB/TRASH output + delay-line state versus a Git baseline:
+python tests/comb_equivalence.py
+
+# bound the OB saturation table's error against the exact polynomial:
+python tests/ob1_table_accuracy.py
 
 # live tests in digiemu (need a digiemu source checkout + a set-up firmware)
 python tests/digiemu_filter_dsp.py  --digiemu <checkout> --fw <folder> --type 8
@@ -203,11 +216,11 @@ python tests/digiemu_filter_page2.py --digiemu <checkout> --fw <folder>
 
 Prebuilt packages live in [`releases/`](releases/README.md) and on the
 [GitHub Releases page](https://github.com/DigiAlchemydsp/DigiFilter/releases).
-The current one, **`DigiFilter-1.1a.zip`**, carries **both OS builds** —
-`elemods/digifilter-1.1a.elemod` for **OS 1.53** and
-`elemods/digifilter-1.1a-os1.54.elemod` for **OS 1.54** — plus the sources,
+The current one, **`DigiFilter-1.1b.zip`**, carries **both OS builds** —
+`elemods/digifilter-1.1b.elemod` for **OS 1.53** and
+`elemods/digifilter-1.1b-os1.54.elemod` for **OS 1.54** — plus the sources,
 docs and the install/build README. `releases/elemods/` also keeps the older
-elemods (1.1, 1.0k, 1.0j, 1.0i, 1.0h).
+elemods (1.1a, 1.1, 1.0k, 1.0j, 1.0i, 1.0h).
 
 ## Credits
 

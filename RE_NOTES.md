@@ -487,7 +487,7 @@ encoders and the restored layout correctly. See HANDOFF-OPTIMIZATION.md §8.
 
 ---
 
-## 15. DSP optimization pass 2 (unreleased)
+## 15. DSP optimization pass 2 (1.1b)
 
 A second pass over the SVF, in the spirit of §13: the extra modes' audio is
 **bit-for-bit identical** (checked by running the whole `digifilter_filt` path,
@@ -539,3 +539,76 @@ and `elekloader.lint` against core 2.1: OK. The 1.54 build reuses the same table
 (`digifilter_svf` loop, new `digifilter_svf4`), `svf_a1_tables.h` (generated),
 `tools/gen_svf_a1.py` + `tools/gen_svf_a1.c` (generator), `tests/df_bench.py`
 (reference numbers), `README.md`, `CHANGELOG.md`.
+
+---
+
+## 16. COMB/TRASH and OB pass: what DSPLIB does and does not offer
+
+The Freescale DSPLIB (`DSPLIBUM`, `DSPLIBCOLDDFIRE.md`) was the starting point
+for this pass. Its eMAC recipes are real, but the three kernels here do not map
+onto its IIR32 or FFT routines:
+
+- **IIR32** computes four output samples per iteration with four accumulators
+  for a *dense* order-N IIR. The comb is `y[n] = x[n] + g y[n-D]`; its denominator
+  is one delayed tap at D (3..255). A generic order-D IIR does O(D) MACs per
+  sample, hundreds of times the direct delay-line read.
+- **FFT32/FFT16** implement block convolution. The feedback comb is recursive,
+  so a block FFT would need a truncation or a block-delay recursion, changing
+  the sound and adding latency; at 32-frame blocks the transform costs more than
+  the whole direct loop (~1700 instructions).
+- The **OB ladder** is a serial nonlinear recurrence: each stage's input is the
+  previous stage's output, and the feedback polynomial/saturation sits on the
+  same chain. There are no four independent products to put in the four eMAC
+  accumulators. Its `fmul` also uses `mac.l` + `movclr.l` already, but the
+  operands are Q11/Q15/Q27, not Q31, so `mac.l`'s fixed `>>31` cannot replace the
+  arbitrary shifts a `muls.l` path needs.
+
+What did apply is the DSPLIB *method*: keep hot state in registers, specialize
+the common branch (damping off; static knobs), and measure core clocks rather
+than instructions. `tests/df_bench.py` now reports both, using digiemu's
+`emu/cftiming.py` (MCF54418RM section 3.3.5 tables).
+
+**Measured** (per voice per 32-frame block; instructions and core cycles):
+
+| mode | before | after | |
+|---|---|---|---|
+| COMB / TRASH | 1727 / 2053 | **1693 / 2016** | damping-off path, no per-sample `damp` branch |
+| OB4 at RESO 64 | 3183 / 5030 | **3213 / 4867** | coefficient cache + fbsat table |
+| OB4 cache only | 3183 / 5030 | 3167 / 4956 | static knobs skip the divide |
+| OB4 swept | 3185 / 5030 | 3247 / 4938 | cache check only in the coef path |
+
+The OB number at RESO 64 replaces the old `df_bench` figure of ~1390: that bench
+was writing the comb feedback field for OB, so it measured the zero-feedback path
+(now ~1390, still correct). With resonance the nonlinear feedback chain dominates.
+The remaining COMB cost is two `muls.l` per sample (4 cycles each) for fractional
+interpolation and feedback. For OB, replacing the five-multiply saturation
+polynomial with the table costs ~46 instructions but saves ~113 cycles a block
+because the table's two loads and one `muls.l` are cheaper than three `muls.l`
+plus the extra weight scaling.
+
+**fbsat table.** `ob1_fbsat_table.h` has 513 entries (512 segments over
+z = 0..32767), `tools/gen_ob1_fbsat.py` regenerates it, and `fbsat` interpolates
+linearly. It is exact at the sampled points; the maximum error against the exact
+polynomial is 1382 internal LSB over the full z sweep and 20k random y
+(~1e-5 of full scale, about -100 dBFS). The full filter's measured output and
+state drift was 0 LSB over 600 blocks of small/mid-resonance and large-signal
+cases (`tests/ob1_table_accuracy.py`). `-DOB1_FBSAT_EXACT` restores the old
+polynomial for comparison.
+
+**Equivalence.** `tests/comb_equivalence.py`: 768 blocks across 8 voices, all
+cutoffs, feedback, harmonics and damping settings, with mode changes; exact
+output and all comb/SVF state versus `00b2d0f`. `tests/ob1_equivalence.py
+--coldfire` stays exact for the old polynomial: build the candidate with
+`-DOB1_FBSAT_EXACT` to run it. The shipped table path is covered by
+`tests/ob1_table_accuracy.py` (600 blocks + the direct 32768-point z sweep).
+Build and `elekloader.lint` against core 2.1 pass.
+
+**Footprint.** `.run` 22484 → 25296 B (+2812 B: the 2.0 KB table, the inlined
+damping-off copy, the cache checks and the table interpolation); `.bss` 9832 →
+9928 B (+96 B, the coefficient-cache keys); RAM 33700 → 36608 of 131072.
+3 sites, 113 relocations, `imports nothing`; `elekloader.lint` as core 2.1: OK.
+
+**Files.** `filter.c` (`comb_nodamp`), `ob1_vcf.c` (coefficient cache, table
+fbsat), `ob1_fbsat_table.h` + `tools/gen_ob1_fbsat.py` (generator),
+`tests/df_bench.py` (OB RESO fix + cycle column), `tests/comb_equivalence.py`,
+`tests/ob1_table_accuracy.py` (new), `README.md`, `CHANGELOG.md`.

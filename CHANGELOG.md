@@ -4,11 +4,12 @@ All notable changes to DigiFilter. Format-2
 [elekloader](https://github.com/irpina/elekloader) mod for the Elektron
 Digitakt **mk1, OS 1.53**. Versioned as `<major>.<minor><letter>`.
 
-## [Unreleased]
+## [1.1b] - 2026-10-18
 
-A second performance pass on the SVF (BP/BP2). The audio is bit-for-bit
-identical (verified over a long sequence that steps FREQ/RESO/ENV and switches
-BP↔BP2); COMB/TRASH and OB4/OB2 are untouched. See `RE_NOTES.md` §15.
+Performance passes on the SVF (BP/BP2) and the COMB/TRASH and OB4/OB2 paths. The
+audio is bit-for-bit identical (verified against a Git baseline) except the OB
+saturation table, whose drift is bounded at ~-100 dBFS; see `RE_NOTES.md`
+§15–§16.
 
 ### Performance
 
@@ -23,11 +24,36 @@ BP↔BP2); COMB/TRASH and OB4/OB2 are untouched. See `RE_NOTES.md` §15.
 - The ramped block (cutoff moving) now runs in a single `digifilter_svf4` call
   that reloads the four sub-block coefficient sets, instead of four `8`-frame
   calls (one register/EMAC save-restore instead of four).
+- **COMB / TRASH**: the damping-off loop is now its own path, so the per-sample
+  `damp` branch and the stack-resident smoothing state are gone:
+  **1727 → 1693** instructions and **2053 → 2016** core cycles per voice per
+  block (~2 %).
+- **OB4 / OB2**: the coefficient set is cached per voice and only recomputed
+  when `(FREQ, RESO)` changes; static knobs skip the divide and the table walks.
+- **OB4 / OB2 saturation**: U28's correction polynomial is now a 512-segment
+  interpolated table (`ob1_fbsat_table.h`), replacing two `z^2`/`z^4` multiplies
+  and the weight scaling. Together with the cache: **3183 → 3213** instructions
+  but **5030 → 4867** cycles (-3.2 %) at RESO 64. The table is exact at its
+  points; between them the error is bounded at ~1.4e3 internal LSB (~-100 dBFS),
+  checked by `tests/ob1_table_accuracy.py`. Build with `-DOB1_FBSAT_EXACT` for
+  the original polynomial.
 
 ### Internals
 
-- New `svf_a1_tables.h` (+ `tools/gen_svf_a1.py`, `tools/gen_svf_a1.c`).
-  `.run` 15156 → 22484 B (+7.3 KB), `.bss` unchanged, imports nothing.
+- New `svf_a1_tables.h` (+ `tools/gen_svf_a1.py`, `tools/gen_svf_a1.c`) and
+  `ob1_fbsat_table.h` (+ `tools/gen_ob1_fbsat.py`). `.run` 15156 → 25296 B
+  (+10.1 KB: the 7.3 KB SVF table, the 2.0 KB saturation table and ~0.8 KB of
+  code), `.bss` 9832 → 9928 B (+96 B); RAM 33700 → 36608 of 131072, 3 sites,
+  113 relocations, `imports nothing`.
+- `tests/df_bench.py` now sets RESO correctly for the OB modes and reports
+  MCF54418 core cycles through digiemu's `emu.cftiming` when available.
+- New `tests/comb_equivalence.py`: COMB/TRASH output and delay-line state
+  against a Git baseline, on ColdFire.
+- New `tests/ob1_table_accuracy.py`: the fbsat table's error against the exact
+  polynomial, plus the full OB path's output/state drift (ColdFire).
+- The DSPLIB IIR32/FFT routines were evaluated and do not fit these kernels
+  (serial ladder recursion; sparse delay-line IIR; non-Q31 operand scaling);
+  see `RE_NOTES.md` §16.
 
 ## [1.1a] - 2026-10-16
 

@@ -304,6 +304,45 @@ static int prev_filt_type[8];        /* reset state when the mode changes */
 #define COMB_DSHIFT 6                /* ~64 samples (1.3 ms) */
 #define COMB_GSHIFT 7
 
+/* Damping off: the same loop, with the state and the block constants in locals.
+ * Keeping it out of the damped path lets the compiler leave `damp` out of the
+ * per-sample branch and the two smoothed values out of the stack. Same
+ * arithmetic as comb_run's inner loop, so the output is identical. */
+static inline __attribute__((always_inline)) void comb_nodamp(int32 *buf, int frames, int32 tdq,
+                                                  int32 gt, int32 *b, int *pos,
+                                                  int32 *dly, int32 *g)
+{
+    int p = *pos, i;
+    int32 d = *dly, gg = *g;
+    for (i = 0; i < frames; i++) {
+        int32 ds, ip, fp, i0, i1, x, val, y, fa, da, ga, va;
+        d += (tdq - d) >> COMB_DSHIFT;
+        gg += (gt - gg) >> COMB_GSHIFT;
+        ds = d;
+        ip = ds >> 16;
+        fp = ds & 0xffff;
+        i0 = (p - ip) & COMB_MASK;
+        i1 = (i0 - 1) & COMB_MASK;
+        x = buf[i];
+        fa = fp >> 1;
+        da = (b[i1] - b[i0]) >> 13;
+        val = b[i0] + ((fa * da) >> 2);
+        ga = gg >> 12;
+        va = val >> 11;
+        y = x + ((ga * va) >> 4);
+        if (y > (1 << 27))
+            y = 1 << 27;
+        else if (y < -(1 << 27))
+            y = -(1 << 27);
+        b[p] = y;
+        p = (p + 1) & COMB_MASK;
+        buf[i] = y;
+    }
+    *pos = p;
+    *dly = d;
+    *g = gg;
+}
+
 /* Feedback comb, fractional and smoothed: y = x + g*y[n-D]. D = COMB_DELAY[fi]
  * / (div * hdiv) (clamped 3..255), g from the RESO/GAIN knob. COMB uses div 1;
  * TRASH uses div 2 for a higher (different) harmonic series. The delay is
@@ -332,6 +371,10 @@ static void comb_run(int32 *buf, int frames, int fi, int fb, int v, int div,
         comb_pos[v] = 0;
         for (i = 0; i < COMB_N; i++)
             b[i] = 0;
+    }
+    if (!damp) {
+        comb_nodamp(buf, frames, tdq, gt, b, &comb_pos[v], &comb_dly[v], &comb_g[v]);
+        return;
     }
     p = comb_pos[v];
     for (i = 0; i < frames; i++) {

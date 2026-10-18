@@ -12,6 +12,7 @@
  * Cubic cutoff and quadratic subthreshold resonance follow the measured reference controls. */
 #include "ob1_vcf.h"
 #include "ob1_tables.h"
+#include "ob1_fbsat_table.h"
 
 typedef int int32;
 typedef unsigned int uint32;
@@ -61,6 +62,8 @@ struct ob1_state {
 static struct ob1_state st[8] = {[0 ... 7] = {.fresh = 1}};
 static int32 seed = SEED;                       /* SEED with a random sign, new each block */
 static uint32 lcg = 1;
+static int last_fi8[8], last_qi[8];             /* the keys of st[v].c, for the coefficient cache */
+static int have_last[8];
 
 void ob1_vcf_reset(int v)
 {
@@ -92,7 +95,11 @@ static void coef(int fi8, int qi, struct ob1_coef *c)
 
 /* U28's saturation, KF tanh(y / KF), as tanh's series to the fifth power, z - z^3/3 + 2 z^5/15 (z = y / KF),
  * up to the knee and its value there, 4/5 KF, past it: the linear part exact, only the correction quantised.
- * The cubic alone over-compresses from z ~ 0.5 (2.1 dB too much THD at 4x a VCO with k 3.3). */
+ * The correction c(|z|) = (5 z^2 - 2 z^4) * 4369 is a 512-segment table (ob1_fbsat_table.h) with
+ * linear interpolation, which replaces the two z^2/z^4 multiplies and the weight scaling. The table is
+ * exact at its points; between them the error is the polynomial's own integer quantisation (~1e-5 of
+ * full scale, ~-100 dBFS). */
+#ifdef OB1_FBSAT_EXACT
 static inline int32 fbsat(int32 y)
 {
     int32 z = fmul(y, INV_KF), z2;              /* y / KF, Q15 */
@@ -104,6 +111,21 @@ static inline int32 fbsat(int32 y)
     /* Both integer weights share 4369; factor after the existing Q15 truncation. */
     return y - fmul(y, (5 * z2 - 2 * ((z2 * z2) >> 15)) * 4369);
 }
+#else
+static inline int32 fbsat(int32 y)
+{
+    int32 z = fmul(y, INV_KF), za, idx, fr, c;   /* y / KF, Q15 */
+    int32 m = z >> 31;                           /* branchless |z| */
+    za = (z ^ m) - m;
+    if (za >= 32768)
+        return z < 0 ? -KF4_5 : KF4_5;
+    idx = za >> 6;                               /* 512 segments over 0..32767 */
+    fr = za & 63;
+    c = OB1_FBSAT_C[idx] +
+        (((OB1_FBSAT_C[idx + 1] - OB1_FBSAT_C[idx]) >> 6) * fr);
+    return y - fmul(y, c);
+}
+#endif
 
 /* The sample loop, inlined into one copy per (linear, two): gcc then tests neither per sample. Four sub-blocks of
  * 8 samples, each with the coefficients at its middle on the line from a (the last block's end) to b (this
@@ -152,7 +174,14 @@ void ob1_vcf_run(int tap, int fi8, int qi, int *buf, int v)
 #endif
     fi8 = fi8 < 0 ? 0 : fi8 > (127 << 8) ? 127 << 8 : fi8;
     qi = qi < 0 ? 0 : qi > 127 ? 127 : qi;
-    coef(fi8, qi, &b);
+    if (have_last[v] && last_fi8[v] == fi8 && last_qi[v] == qi) {
+        b = p->c;                               /* static knobs: no divide, no table walks */
+    } else {
+        coef(fi8, qi, &b);
+        last_fi8[v] = fi8;
+        last_qi[v] = qi;
+        have_last[v] = 1;
+    }
     a = p->fresh ? b : p->c;
     p->c = b;
     p->fresh = 0;

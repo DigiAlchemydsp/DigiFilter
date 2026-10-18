@@ -92,7 +92,7 @@ display have not been regenerated for the current control laws.
 | | |
 |---|---|
 | model | the linear ladder matches the analog prototype; 24 / 12 dB per octave; passband 0.25 / (1 + k); self-oscillation from k = 4; distortion within 1.3 dB of SPICE (no resonance) and 0.5 dB (k 3.33) |
-| saturation | with resonance in U28, the resonance OTA (knee 1.61 x a VCO at stage 4); without, only the stages' own OTAs, and slightly (knee 4.9). The kernel has U28's |
+| saturation | with resonance in U28, the resonance OTA (knee 1.61 x a VCO at stage 4); without, only the stages' own OTAs, and slightly (knee 4.9). The kernel has U28's; its correction polynomial is a 512-segment interpolated table (max error 1382 internal LSB, about -100 dBFS; `-DOB1_FBSAT_EXACT` restores the polynomial) |
 | kernel vs model | linear: worst error 7.6e-4 of the peak over 72 cases spanning FREQ 0-127, RESO 0-78 and both outputs; resonant distortion within 0.03 dB at 0.5-2 x a VCO, k 3.30 |
 | level | the render's blocks are Q31; a full-scale sample is two OB-1 VCOs at ON (`IN_SHIFT`), so a hot mix saturates as two would. The output saturates rather than wraps |
 | full-scale input and sweeps | no wrap-around at low cutoff; a full-scale sweep FREQ 20-90-20 at RESO 73 steps no more than a gliding model (0.1414 against 0.1410) |
@@ -100,7 +100,7 @@ display have not been regenerated for the current control laws.
 | self-oscillation | from silence at RESO 127: about 8.9 s at FREQ 0 (10 Hz), 0.36 s at 32, 0.11 s at 48, 0.05 s at 64, 0.02 s at 96/112; the quiet seed is enabled from RESO 80 |
 | artefacts | silence in gives exactly silence out through RESO 79; after a loud note the tested tails settle within 176 LSB (-142 dB) of zero; stable at every corner of the knobs; tested folded harmonics at least 144 dB under the fundamental |
 | headroom | paired native sweeps peak at 0.351 full scale, versus 0.358 before calibration; full-scale square/alternating stress inputs remain below clipping, peaking at 0.886 |
-| cost | 3044-3053 (OB4) and 2980-2989 (OB2) instructions per block; at RESO 64 through the dispatch 3093 / 3028 |
+| cost | ~3180-3250 instructions per block; at RESO 64 through the dispatch 3213 (OB4) / 3181 (OB2), about 4870 / 4950 MCF54418 core cycles (`tests/df_bench.py`) |
 | ColdFire agreement | linked kernel differs from native by at most 7098 Q31 LSB in moving-control, onset, full-scale, clamp and voice-state cases (less than a quarter of a 16-bit output step) |
 | in the firmware | both OS builds match native output within 16 Q31 LSB through the actual dispatch, including fractional cutoff and envelope depth |
 | audio timing | eight active voices, moving cutoff, maximum resonance: no missed render deadlines, worst remaining timing margin 28.46% (OS 1.53), 28.32% (OS 1.54) in the focused simulator fixture |

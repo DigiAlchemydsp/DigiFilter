@@ -3,6 +3,11 @@
 
 Run with mise-managed Python; --coldfire requires digiemu's patched Unicorn.
 The baseline is compiled independently, including its own state and random seed.
+
+The shipped kernel uses an interpolated fbsat table, so the candidate is built
+with -DOB1_FBSAT_EXACT (the original polynomial) to keep this an exact check of
+everything else. Pass --table to compare the table build as-is, or use
+tests/ob1_table_accuracy.py for the table's bounded error.
 """
 import argparse
 import ctypes
@@ -31,14 +36,15 @@ void ob1_test_snapshot(void) {
 '''
 
 
-def build(folder, name, source, coldfire):
+def build(folder, name, source, coldfire, define=None):
     file = folder / (name + '.c')
     file.write_text(source + SNAPSHOT)
+    extra = ['-D' + define] if define else []
     if coldfire:
         elf = folder / (name + '.elf')
         subprocess.run(['m68k-elf-gcc', '-mcpu=54455', '-O2', '-ffreestanding',
                         '-fno-builtin', '-nostdlib', '-fomit-frame-pointer', '-Wall',
-                        '-I', str(ROOT), str(file), '-Wl,-Ttext=0x10000',
+                        '-I', str(ROOT), str(file)] + extra + ['-Wl,-Ttext=0x10000',
                         '-Wl,-e,ob1_vcf_run', '-o', str(elf)], check=True)
         binary = folder / (name + '.bin')
         subprocess.run(['m68k-elf-objcopy', '-O', 'binary', str(elf), str(binary)], check=True)
@@ -48,7 +54,7 @@ def build(folder, name, source, coldfire):
         return ColdFire(binary.read_bytes(), symbols)
     lib = folder / (name + '.so')
     subprocess.run(['cc', '-O2', '-shared', '-fPIC', '-Wall', '-Wextra', '-I', str(ROOT),
-                    str(file), '-o', str(lib)], check=True)
+                    str(file)] + extra + ['-o', str(lib)], check=True)
     return Native(lib)
 
 
@@ -106,6 +112,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', default=BASELINE)
     parser.add_argument('--coldfire', action='store_true')
+    parser.add_argument('--table', action='store_true',
+                        help='build the candidate with the interpolated fbsat table '
+                             '(not bit-exact; use tests/ob1_table_accuracy.py)')
     args = parser.parse_args()
     # The feedback weights factor exactly after, not before, the existing Q15 truncation.
     for z2 in range(32768):
@@ -117,7 +126,8 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory)
         old = build(folder, 'baseline', original, args.coldfire)
-        new = build(folder, 'candidate', (ROOT / 'ob1_vcf.c').read_text(), args.coldfire)
+        new = build(folder, 'candidate', (ROOT / 'ob1_vcf.c').read_text(), args.coldfire,
+                    None if args.table else 'OB1_FBSAT_EXACT')
         rng = random.Random(314159)
         controls = [(fi, qi) for fi in [-256, 0, 1, 255, 256, 8193, 16384, 32511, 32512, 32768]
                     for qi in [-1, 0, 64, 79, 80, 81, 127, 128]]
