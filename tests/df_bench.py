@@ -14,8 +14,8 @@ clears the state and the coefficient cache).
     # from a digiemu checkout, with m68k-elf-gcc on PATH:
     python <DigiFilter>/tests/df_bench.py
 
-Reference (SDK flags, MCF54418): BP/BP2 static ~1230, swept ~2420; COMB/TRASH
-~1730; OB4/OB2 ~3000; the stock per-voice filter ~2400.
+Reference (SDK flags, MCF54418): BP/BP2 static ~1070, swept ~1640; COMB/TRASH
+~1730; OB4/OB2 ~1390-1425; the stock per-voice filter ~2400.
 """
 import os
 import struct

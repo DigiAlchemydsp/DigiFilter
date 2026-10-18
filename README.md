@@ -119,12 +119,13 @@ does not step or click. The filter envelope is added to the cutoff exactly as th
 stock filter does.
 
 Per voice per render block (measured in digiemu / `tests/df_bench.py`), TYPE 1
-(stock) costs ~2400 instructions; **BP/BP2 ~1200 with static knobs and ~2400
+(stock) costs ~2400 instructions; **BP/BP2 ~1070 with static knobs and ~1640
 while the cutoff is swept** (the coefficients are cached and only recomputed when
-the cutoff/resonance actually move); COMB/TRASH ~1730; OB4/OB2 ~3000. So BP/BP2
-are now cheaper than the stock filter when the knobs are still, and every mode
-stays within the stock filter's own order. The SVF caches its coefficients, the
-OB-1 ladder computes them at the block's ends and ramps between them, and the
+the cutoff/resonance actually move, and the only division — the SVF's `a1` — is a
+precomputed table, so no software division runs at all); COMB/TRASH ~1730; OB4/OB2
+~1390-1425. So BP/BP2 are now cheaper than the stock filter even while the cutoff
+moves, and every mode stays within the stock filter's own order. The OB-1 ladder
+computes its coefficients at the block's ends and ramps between them, and the
 comb's interpolation and feedback each use a single 32×32 multiply.
 
 ## Building

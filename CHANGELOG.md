@@ -4,6 +4,31 @@ All notable changes to DigiFilter. Format-2
 [elekloader](https://github.com/irpina/elekloader) mod for the Elektron
 Digitakt **mk1, OS 1.53**. Versioned as `<major>.<minor><letter>`.
 
+## [Unreleased]
+
+A second performance pass on the SVF (BP/BP2). The audio is bit-for-bit
+identical (verified over a long sequence that steps FREQ/RESO/ENV and switches
+BP↔BP2); COMB/TRASH and OB4/OB2 are untouched. See `RE_NOTES.md` §15.
+
+### Performance
+
+- **BP / BP2**: the SVF's only division — its `a1 = 1/(1+g(g+k))` coefficient —
+  is now a precomputed 14×128 table (`tools/gen_svf_a1.py`, generated from the
+  module's own `div55` so the values are exact). The swept (envelope/LFO) path no
+  longer runs any software division: **2424 → 1635** instructions per voice per
+  block (-33 %). Static knobs: **1229 → 1072** (-13 %).
+- The SVF sample loop drops the always-zero `c2*v2` MAC, updates `ic1`/`ic2` in
+  place (8 → 6 instructions), and hoists the ±2^27 clamp constants out of the
+  loop.
+- The ramped block (cutoff moving) now runs in a single `digifilter_svf4` call
+  that reloads the four sub-block coefficient sets, instead of four `8`-frame
+  calls (one register/EMAC save-restore instead of four).
+
+### Internals
+
+- New `svf_a1_tables.h` (+ `tools/gen_svf_a1.py`, `tools/gen_svf_a1.c`).
+  `.run` 15156 → 22484 B (+7.3 KB), `.bss` unchanged, imports nothing.
+
 ## [1.1a] - 2026-10-16
 
 Performance pass on the per-voice DSP. The extra modes sound bit-for-bit

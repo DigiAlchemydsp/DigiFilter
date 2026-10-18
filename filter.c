@@ -36,6 +36,9 @@ typedef int int32;
 typedef unsigned int uint32;
 
 #include "filter_tables.h"
+#ifndef SVF_A1_GEN
+#include "svf_a1_tables.h"          /* mode_coef's a1, precomputed by tools/gen_svf_a1.py */
+#endif
 #include "ob1_vcf.h"
 
 /* ---- firmware (OS 1.53) ---- */
@@ -91,6 +94,7 @@ static int32 dsp_st[8][2];                          /* per voice: ic1, ic2 */
 static int prev_mode[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 
 extern void digifilter_svf(int32 *buf, int frames, const int32 *coef, int32 *state);
+extern void digifilter_svf4(int32 *buf, const int32 *coef4, int32 *state);
 
 /* floor(a * b / 2^sh) for 16 <= sh <= 31, when the result fits 32 bits */
 static inline __attribute__((always_inline)) int32 mulsh(int32 a, int32 b, int sh)
@@ -108,7 +112,9 @@ static inline __attribute__((always_inline)) int32 mulsh(int32 a, int32 b, int s
     return (int32)((hi << (32 - sh)) | (lo >> sh));
 }
 
-/* floor(2^55 / d), d > 2^24 */
+/* floor(2^55 / d), d > 2^24. Only tools/gen_svf_a1.py compiles this: the shipped
+ * build reads the precomputed SVF_A1 table instead (a1 is the only division). */
+#ifdef SVF_A1_GEN
 static int32 div55(uint32 d)
 {
     uint32 rem = 1u << 23, q = 0;
@@ -124,6 +130,7 @@ static int32 div55(uint32 d)
     }
     return (int32)q;
 }
+#endif
 
 static int clampi(int v, int lo, int hi)
 {
@@ -137,13 +144,19 @@ static void mode_coef(int m, int fi, int qi, struct fcoef *c)
      * clips on transients, so limit the maximum Q to index 13 (~Q 5). This is a
      * coefficient-time change (the hot loop is unchanged). BP2 halves it. */
     int qk = qi * 13 / 15;
-    int32 g = G27[fi], k = K27[m == FM_BP2 ? (qk >> 1) : qk], d24;
+    int ek = m == FM_BP2 ? (qk >> 1) : qk;      /* the index into K27 the mode uses */
+    int32 g = G27[fi], k = K27[ek];
     /* band-pass output mix: out = c1 * band  (c0 cancels the input's v0 term) */
     c->c0 = -ONE27;
     c->c1 = k;              /* mulsh(k, ONE27, 27) == k exactly, k >= 0 */
     c->c2 = 0;
-    d24 = (1 << 24) + mulsh(g, g + k, 30);
-    c->a1 = div55((uint32)d24);
+#ifdef SVF_A1_GEN
+    c->a1 = div55((uint32)((1 << 24) + mulsh(g, g + k, 30)));
+#else
+    /* a1 = floor(2^55 / ((1 << 24) + mulsh(g, g + k, 30))): precomputed for every
+     * (ek, fi) by tools/gen_svf_a1.py, so a block needs no software division. */
+    c->a1 = SVF_A1[ek][fi];
+#endif
     c->a2 = mulsh(g, c->a1, 27);
     c->a3 = mulsh(g, c->a2, 27);
 }
@@ -220,7 +233,8 @@ static void df_persist(void)
 /* The render calls, per voice, the stock per-voice filter
  *   0x40072844(params, buffer, active, voice)
  * at 0x400780c4, through a3. mod.json hooks the instruction just before the
- * call, 0x400780ba (`addil #0x80001a18,%d0`), with digifilter_dispatch
+ * call, 0x400780ba (the instruction that computes the buffer pointer), with
+ * digifilter_dispatch
  * (filter_glue.s); the dispatcher points a3 at digifilter_filt for our TYPE
  * values and restores the original target otherwise, so a profiling wrapper
  * another mod installed (e.g. digihealth) keeps working.
@@ -431,19 +445,23 @@ static void svf_run(int m, int fi, int qi, int32 *buf, int v)
         digifilter_svf(buf, 32, (const int32 *)&c1, dsp_st[v]);
         return;
     }
-    for (k = 0; k < 4; k++) {
-        int w = k + 1;                               /* 1..4, ends exactly at c1 */
-        int32 *d = (int32 *)&c0, *e = (int32 *)&c1;
-        struct fcoef c;
-        int32 *o = (int32 *)&c;
-        int j;
-        for (j = 0; j < 6; j++) {
-            /* Lerp d..e by w/4 without overflowing on a large jump: split the
-             * delta so no intermediate exceeds 32 bits. */
-            int32 delta = e[j] - d[j];
-            o[j] = d[j] + (delta >> 2) * w + (((delta & 3) * w) >> 2);
+    {
+        /* Build the four sub-block sets and run them in one call: the prologue/
+         * epilogue and the EMAC save/restore happen once, not four times. */
+        struct fcoef c4[4];
+        for (k = 0; k < 4; k++) {
+            int w = k + 1;                           /* 1..4, ends exactly at c1 */
+            int32 *d = (int32 *)&c0, *e = (int32 *)&c1;
+            int32 *o = (int32 *)&c4[k];
+            int j;
+            for (j = 0; j < 6; j++) {
+                /* Lerp d..e by w/4 without overflowing on a large jump: split the
+                 * delta so no intermediate exceeds 32 bits. */
+                int32 delta = e[j] - d[j];
+                o[j] = d[j] + (delta >> 2) * w + (((delta & 3) * w) >> 2);
+            }
         }
-        digifilter_svf(buf + 8 * k, 8, (const int32 *)&c, dsp_st[v]);
+        digifilter_svf4(buf, (const int32 *)c4, dsp_st[v]);
     }
 }
 
