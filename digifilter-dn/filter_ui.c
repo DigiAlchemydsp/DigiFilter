@@ -299,6 +299,7 @@ static void ob_curve_ui(int32_t mode, int32_t fi, int32_t qi)
 {
     const signed char (*c)[129] = OB1_CURVE[mode == FM_OB2];
     int32_t lvl = qi >> 4, span = lvl < 7 ? 16 : 15, frac = qi - 16 * lvl, x;
+    fi = OB1_POSITION[fi];   /* cutoff on the graph's log-frequency axis (upstream calibration) */
     for (x = 0; x < 128; x++) {
         int32_t d = clampi_ui(x - fi + 64, 0, 128);
         int32_t v = c[lvl][d] + (c[lvl + 1][d] - c[lvl][d]) * frac / span;

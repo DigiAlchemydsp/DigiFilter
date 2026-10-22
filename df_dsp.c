@@ -1,15 +1,20 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* DigiFilter shared DSP core: firmware-free SVF/comb math + per-voice state.
  *
- * Digitakt 1.1a verbatim (copy-paste, no logic changes). 1.1a keeps cached
- * SVF coefficients when still (one digifilter_svf call for the whole block)
- * and ramps from the cached set when sweeping; c1=k exactly (one mulsh saved).
- * Sound identical, cost lower when still. No kit/engine/firmware here.
+ * Digitakt 1.1b verbatim (copy-paste, no logic changes). Cached SVF
+ * coefficients when still (one digifilter_svf call for the whole block), a
+ * linear ramp run in one digifilter_svf4 call when sweeping, precomputed a1
+ * (no software division per block), and a damping-free comb fast path.
+ * Sound identical, cost lower. No kit/engine/firmware here.
  */
 #include "df_dsp.h"
 #include "filter_tables.h"
+#ifndef SVF_A1_GEN
+#include "svf_a1_tables.h"          /* a1 per (resonance, cutoff), from tools/gen_svf_a1.py */
+#endif
 
 extern void digifilter_svf(int32 *buf, int frames, const int32 *coef, int32 *state);
+extern void digifilter_svf4(int32 *buf, const int32 *coef4, int32 *state);
 
 static int32 dsp_st[8][2];
 static int32 comb_buf[8][256];
@@ -43,7 +48,9 @@ int32 df_mulsh(int32 a, int32 b, int sh)
     return (int32)((hi << (32 - sh)) | (lo >> sh));
 }
 
-/* floor(2^55 / d), d > 2^24. */
+/* floor(2^55 / d), d > 2^24. Only tools/gen_svf_a1.py compiles this: the
+ * shipped build reads the precomputed SVF_A1 table instead. */
+#ifdef SVF_A1_GEN
 int32 df_div55(uint32 d)
 {
     uint32 rem = 1u << 23, q = 0;
@@ -59,6 +66,7 @@ int32 df_div55(uint32 d)
     }
     return (int32)q;
 }
+#endif
 
 int df_clampi(int v, int lo, int hi)
 {
@@ -70,14 +78,57 @@ int df_clampi(int v, int lo, int hi)
 void df_mode_coef(int m, int fi, int qi, struct df_coef *c)
 {
     int qk = qi * 13 / 15;
-    int32 g = G27[fi], k = K27[(m == 1) ? (qk >> 1) : qk], d24;
+    int ek = (m == 1) ? (qk >> 1) : qk;      /* the index into K27 the mode uses */
+    int32 g = G27[fi], k = K27[ek];
     c->c0 = -ONE27;
     c->c1 = k;
     c->c2 = 0;
-    d24 = (1 << 24) + df_mulsh(g, g + k, 30);
-    c->a1 = df_div55((uint32)d24);
+#ifdef SVF_A1_GEN
+    c->a1 = df_div55((uint32)((1 << 24) + df_mulsh(g, g + k, 30)));
+#else
+    /* a1 = floor(2^55 / ((1 << 24) + mulsh(g, g + k, 30))): precomputed for every
+     * (ek, fi) by tools/gen_svf_a1.py, so a block needs no software division. */
+    c->a1 = SVF_A1[ek][fi];
+#endif
     c->a2 = df_mulsh(g, c->a1, 27);
     c->a3 = df_mulsh(g, c->a2, 27);
+}
+
+/* Damping-free comb: same math, but without the per-sample damp branch or
+ * comb_lp update. Used when the damping knob is at zero, which is common. */
+static inline __attribute__((always_inline)) void df_comb_nodamp(int32 *buf, int frames,
+                                                  int32 tdq, int32 gt, int32 *b, int *pos,
+                                                  int32 *dly, int32 *g)
+{
+    int p = *pos, i;
+    int32 d = *dly, gg = *g;
+    for (i = 0; i < frames; i++) {
+        int32 ds, ip, fp, i0, i1, x, val, y, fa, da, ga, va;
+        d += (tdq - d) >> COMB_DSHIFT;
+        gg += (gt - gg) >> COMB_GSHIFT;
+        ds = d;
+        ip = ds >> 16;
+        fp = ds & 0xffff;
+        i0 = (p - ip) & COMB_MASK;
+        i1 = (i0 - 1) & COMB_MASK;
+        x = buf[i];
+        fa = fp >> 1;
+        da = (b[i1] - b[i0]) >> 13;
+        val = b[i0] + ((fa * da) >> 2);
+        ga = gg >> 12;
+        va = val >> 11;
+        y = x + ((ga * va) >> 4);
+        if (y > (1 << 27))
+            y = 1 << 27;
+        else if (y < -(1 << 27))
+            y = -(1 << 27);
+        b[p] = y;
+        p = (p + 1) & COMB_MASK;
+        buf[i] = y;
+    }
+    *pos = p;
+    *dly = d;
+    *g = gg;
 }
 
 /* Feedback comb, fractional and smoothed: y = x + g*y[n-D].
@@ -103,6 +154,10 @@ void df_comb_run(int32 *buf, int frames, int fi, int fb, int v, int div,
         comb_pos[v] = 0;
         for (i = 0; i < COMB_N; i++)
             b[i] = 0;
+    }
+    if (!damp) {
+        df_comb_nodamp(buf, frames, tdq, gt, b, &comb_pos[v], &comb_dly[v], &comb_g[v]);
+        return;
     }
     p = comb_pos[v];
     for (i = 0; i < frames; i++) {
@@ -166,17 +221,23 @@ void df_svf_run(int m, int fi, int qi, int32 *buf, int v)
         digifilter_svf(buf, 32, (const int32 *)&c1, dsp_st[v]);
         return;
     }
-    for (k = 0; k < 4; k++) {
-        int w = k + 1;
-        int32 *d = (int32 *)&c0, *e = (int32 *)&c1;
-        struct df_coef c;
-        int32 *o = (int32 *)&c;
-        int j;
-        for (j = 0; j < 6; j++) {
-            int32 delta = e[j] - d[j];
-            o[j] = d[j] + (delta >> 2) * w + (((delta & 3) * w) >> 2);
+    {
+        /* Build the four sub-block sets and run them in one call: the prologue/
+         * epilogue and the EMAC save/restore happen once, not four times. */
+        struct df_coef c4[4];
+        for (k = 0; k < 4; k++) {
+            int w = k + 1;                           /* 1..4, ends exactly at c1 */
+            int32 *d = (int32 *)&c0, *e = (int32 *)&c1;
+            int32 *o = (int32 *)&c4[k];
+            int j;
+            for (j = 0; j < 6; j++) {
+                /* Lerp d..e by w/4 without overflowing on a large jump: split the
+                 * delta so no intermediate exceeds 32 bits. */
+                int32 delta = e[j] - d[j];
+                o[j] = d[j] + (delta >> 2) * w + (((delta & 3) * w) >> 2);
+            }
         }
-        digifilter_svf(buf + 8 * k, 8, (const int32 *)&c, dsp_st[v]);
+        digifilter_svf4(buf, (const int32 *)c4, dsp_st[v]);
     }
 }
 

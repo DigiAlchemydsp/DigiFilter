@@ -7,19 +7,16 @@
  * G^4 u + S; the feedback through U28's saturation, u = x - k T(that); the four one-poles, v = G (in - s),
  * y = v + s, s' = y + v. Per block: G from the table (interpolated), G^4, 1 / (1 + k G^4) and
  * G^4 / (1 + k G^4), ramped from the last block's across four sub-blocks. The stages' own saturation (the
- * model's KS) is left out: it only shows without resonance, about 0.03 % THD at twice a VCO's level (SPICE,
- * https://github.com/simonjohansson/DigiFilter/issues/2).
+ * model's KS) is left out: it only shows without resonance, about 0.03 % THD at twice a VCO's level in SPICE.
  *
- * Tunable: IN_SHIFT, the level (a full-scale Q31 sample is two OB-1 VCOs at ON); K_MAX8, where RESO
- * self-oscillates (~121) and how fast RESO 127 starts howling from silence (about 0.05 s at FREQ 96, 0.35 s
- * at 64, 1 s at 48, 3 s at 32; the seed is random, so roughly; a higher K_MAX8 starts sooner). */
+ * Cubic cutoff and quadratic subthreshold resonance follow the measured reference controls. */
 #include "ob1_vcf.h"
 #include "ob1_tables.h"
+#include "ob1_fbsat_table.h"
 
 typedef int int32;
 typedef unsigned int uint32;
 
-#define K_MAX8      1127428915  /* K_MAX / 8 = 0.525 (k 4.2 at RESO 127), Q31; k / 4 would not fit */
 /* U28's knee on y4: the model's KF = 1.61, with one VCO = 2^27 internally. */
 #define INV_KF      325645      /* 2^46 / (1.61 * 2^27): fmul(y, INV_KF) = y / KF in Q15 */
 #define KF4_5       172872434   /* 4/5 KF: the polynomial at y = KF, its ceiling */
@@ -35,7 +32,7 @@ typedef unsigned int uint32;
                                    round away in the stages (a stage passes nothing under ~0.5 / G LSBs). A sign
                                    that only alternated (a 750 Hz pattern) never started a low cutoff; the
                                    random one has the low frequencies */
-#define SEED_K8     (K_MAX8 / 127 * 119)    /* only from RESO 119 (k 3.94) up: below, it would leak to the
+#define SEED_K8     1057635697  /* k / 8 = 3.94 / 8, Q31: only near oscillation, otherwise it would leak to the
                                    output and silence in would not give silence out */
 
 #ifdef __mcoldfire__
@@ -65,6 +62,8 @@ struct ob1_state {
 static struct ob1_state st[8] = {[0 ... 7] = {.fresh = 1}};
 static int32 seed = SEED;                       /* SEED with a random sign, new each block */
 static uint32 lcg = 1;
+static int last_fi8[8], last_qi[8];             /* the keys of st[v].c, for the coefficient cache */
+static int have_last[8];
 
 void ob1_vcf_reset(int v)
 {
@@ -77,12 +76,18 @@ void ob1_vcf_reset(int v)
 static void coef(int fi8, int qi, struct ob1_coef *c)
 {
     int32 G, G4, i = fi8 >> 8;
-    uint32 den16;
+    uint32 den16, k24;
     G = OB1_G[i] + ((OB1_G[i + 1] - OB1_G[i]) >> 8) * (fi8 & 0xff);
     G4 = fmul(G, G);
     G4 = fmul(G4, G4);
     c->G = G;
-    c->k8 = (int32)((uint32)K_MAX8 / 127u * (uint32)qi);                /* k / 8, Q31 */
+    k24 = (10u * (1u << 24) / (127 * 127)) * (uint32)(qi * qi);
+    /* Compress above-onset drive to match the measured amplitude rise with the retained saturation. */
+    if (k24 > (4u << 24)) {
+        uint32 d12 = (k24 >> 12) - (5u << 11);                        /* k - 2.5, Q12 */
+        k24 = ((17u << 14) - (3u << 25) / d12) << 8;                  /* 4.25 - 0.375/(k - 2.5), Q24 */
+    }
+    c->k8 = (int32)(k24 << 4);                                       /* k / 8, Q31 */
     den16 = 65536u + ((uint32)fmul(c->k8, G4) >> 12);                  /* 1 + k G^4, Q16 */
     c->r = (int32)((0x80000000u / den16) << 15);                        /* its reciprocal, Q30 */
     c->g4r = fmul(G4, c->r) << 1;                                      /* G^4 / (1 + k G^4), Q31 */
@@ -90,7 +95,11 @@ static void coef(int fi8, int qi, struct ob1_coef *c)
 
 /* U28's saturation, KF tanh(y / KF), as tanh's series to the fifth power, z - z^3/3 + 2 z^5/15 (z = y / KF),
  * up to the knee and its value there, 4/5 KF, past it: the linear part exact, only the correction quantised.
- * The cubic alone over-compresses from z ~ 0.5 (2.1 dB too much THD at 4x a VCO with k 3.3). */
+ * The correction c(|z|) = (5 z^2 - 2 z^4) * 4369 is a 512-segment table (ob1_fbsat_table.h) with
+ * linear interpolation, which replaces the two z^2/z^4 multiplies and the weight scaling. The table is
+ * exact at its points; between them the error is the polynomial's own integer quantisation (~1e-5 of
+ * full scale, ~-100 dBFS). */
+#ifdef OB1_FBSAT_EXACT
 static inline int32 fbsat(int32 y)
 {
     int32 z = fmul(y, INV_KF), z2;              /* y / KF, Q15 */
@@ -99,14 +108,30 @@ static inline int32 fbsat(int32 y)
     if (z <= -32768)
         return -KF4_5;
     z2 = (z * z) >> 15;                         /* z^2, Q15 */
-    return y - fmul(y, z2 * 21845 - ((z2 * z2) >> 15) * 8738);    /* y (1 - z^2/3 + 2 z^4/15), Q31: 2^16/3, 2^17/15 */
+    /* Both integer weights share 4369; factor after the existing Q15 truncation. */
+    return y - fmul(y, (5 * z2 - 2 * ((z2 * z2) >> 15)) * 4369);
 }
+#else
+static inline int32 fbsat(int32 y)
+{
+    int32 z = fmul(y, INV_KF), za, idx, fr, c;   /* y / KF, Q15 */
+    int32 m = z >> 31;                           /* branchless |z| */
+    za = (z ^ m) - m;
+    if (za >= 32768)
+        return z < 0 ? -KF4_5 : KF4_5;
+    idx = za >> 6;                               /* 512 segments over 0..32767 */
+    fr = za & 63;
+    c = OB1_FBSAT_C[idx] +
+        (((OB1_FBSAT_C[idx + 1] - OB1_FBSAT_C[idx]) >> 6) * fr);
+    return y - fmul(y, c);
+}
+#endif
 
 /* The sample loop, inlined into one copy per (linear, two): gcc then tests neither per sample. Four sub-blocks of
  * 8 samples, each with the coefficients at its middle on the line from a (the last block's end) to b (this
  * one's), as svf_run ramps: a cutoff moving each block doesn't step. */
 static inline __attribute__((always_inline)) void loop(int32 *s, int32 *buf, const struct ob1_coef *a,
-                                                         const struct ob1_coef *b, const int linear, const int two)
+                                                         const struct ob1_coef *b, const int linear, const int two, const int zero)
 {
     int32 s0 = s[0] + (linear || b->k8 < SEED_K8 ? 0 : seed), s1 = s[1], s2 = s[2], s3 = s[3];
     int32 dG = (b->G - a->G) >> 3, dk = (b->k8 - a->k8) >> 3, dr = (b->r - a->r) >> 3, dg = (b->g4r - a->g4r) >> 3;
@@ -116,12 +141,16 @@ static inline __attribute__((always_inline)) void loop(int32 *s, int32 *buf, con
         int32 r = a->r + dr * (2 * j + 1), g4r = a->g4r + dg * (2 * j + 1), omg = 0x7fffffff - G;
         for (i = 8 * j; i < 8 * j + 8; i++) {
             int32 S, e, u, w, x = buf[i] >> IN_SHIFT, y1, y2, y3, y4, y;
-            S = fmul(omg, fmul(G, fmul(G, fmul(G, s0) + s1) + s2) + s3);  /* Horner: 4 multiplies, not 7 */
-            e = x - (fmul(k8, S) << 3);                              /* x - k S */
-            if (linear)
-                u = fmul(e, r) << 1;                                 /* the loop's input, (x - k S) / (1 + k G^4) */
-            else                                                     /* y4's linear estimate through U28 */
-                u = x - (fmul(k8, fbsat(fmul(g4r, e) + S)) << 3);
+            if (zero) {
+                u = x;
+            } else {
+                S = fmul(omg, fmul(G, fmul(G, fmul(G, s0) + s1) + s2) + s3);  /* Horner: 4 multiplies, not 7 */
+                e = x - (fmul(k8, S) << 3);                              /* x - k S */
+                if (linear)
+                    u = fmul(e, r) << 1;                                 /* the loop's input, (x - k S) / (1 + k G^4) */
+                else                                                     /* y4's linear estimate through U28 */
+                    u = x - (fmul(k8, fbsat(fmul(g4r, e) + S)) << 3);
+            }
             w = fmul(G, u - s0); y1 = w + s0; s0 = y1 + w;
             w = fmul(G, y1 - s1); y2 = w + s1; s1 = y2 + w;
             w = fmul(G, y2 - s2); y3 = w + s2; s2 = y3 + w;
@@ -145,16 +174,26 @@ void ob1_vcf_run(int tap, int fi8, int qi, int *buf, int v)
 #endif
     fi8 = fi8 < 0 ? 0 : fi8 > (127 << 8) ? 127 << 8 : fi8;
     qi = qi < 0 ? 0 : qi > 127 ? 127 : qi;
-    coef(fi8, qi, &b);
+    if (have_last[v] && last_fi8[v] == fi8 && last_qi[v] == qi) {
+        b = p->c;                               /* static knobs: no divide, no table walks */
+    } else {
+        coef(fi8, qi, &b);
+        last_fi8[v] = fi8;
+        last_qi[v] = qi;
+        have_last[v] = 1;
+    }
     a = p->fresh ? b : p->c;
     p->c = b;
     p->fresh = 0;
     lcg = lcg * 1664525u + 1013904223u;                          /* a random sign each block */
     seed = lcg & 0x80000000u ? -SEED : SEED;
-    if (linear)
-        two ? loop(p->s, buf, &a, &b, 1, 1) : loop(p->s, buf, &a, &b, 1, 0);
+    /* Both endpoints must be zero: a zero destination can still have a feedback ramp. */
+    if (!linear && a.k8 == 0 && b.k8 == 0)
+        two ? loop(p->s, buf, &a, &b, 0, 1, 1) : loop(p->s, buf, &a, &b, 0, 0, 1);
+    else if (linear)
+        two ? loop(p->s, buf, &a, &b, 1, 1, 0) : loop(p->s, buf, &a, &b, 1, 0, 0);
     else
-        two ? loop(p->s, buf, &a, &b, 0, 1) : loop(p->s, buf, &a, &b, 0, 0);
+        two ? loop(p->s, buf, &a, &b, 0, 1, 0) : loop(p->s, buf, &a, &b, 0, 0, 0);
 #ifdef __mcoldfire__
     __asm__ volatile("move.l %0,%%macsr" :: "d"(macsr));
 #endif
