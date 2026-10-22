@@ -40,9 +40,9 @@ int test_run(int voice) {
 '''
 
 
-def build(folder, name, source, dsp, ob1):
+def build(folder, name, source, dsp, ob1, extra=''):
     c = folder / (name + '.c')
-    c.write_text(source + SNAPSHOT)
+    c.write_text(source + extra + SNAPSHOT)
     asm = folder / (name + '.s')
     asm.write_text(dsp)
     ob = folder / (name + '_ob1.c')
@@ -112,7 +112,8 @@ def main():
         folder = Path(directory)
         old = build(folder, 'baseline', old_src, old_dsp, old_ob1)
         new = build(folder, 'candidate', (ROOT / 'filter.c').read_text(),
-                    (ROOT / 'filter_dsp.s').read_text(), (ROOT / 'ob1_vcf.c').read_text())
+                    (ROOT / 'filter_dsp.s').read_text(), (ROOT / 'ob1_vcf.c').read_text(),
+                    extra='\n#include "df_dsp.c"\n')
         blocks = 0
         for voice in range(8):
             type_ = 10

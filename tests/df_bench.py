@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Count the digifilter per-voice DSP path's ColdFire instructions per 32-frame block.
 
-Builds the module's DSP sources (filter.c + ob1_vcf.c + filter_dsp.s) with
-tests/df_bench.c using the same flags as the SDK, links at 0x10000 and runs
+Builds the module's DSP sources (df_dsp.c + filter.c + ob1_vcf.c + filter_dsp.s)
+with tests/df_bench.c using the same flags as the SDK, links at 0x10000 and runs
 digifilter_filt() in Unicorn, counting executed instructions. Needs a Unicorn
 that executes the ColdFire EMAC (mac.l, movclr.l): digiemu's patched build.
 
@@ -45,6 +45,7 @@ def build():
     d = tempfile.mkdtemp()
     elf = os.path.join(d, 'df.elf')
     subprocess.check_call([CROSS + 'gcc'] + CFLAGS + ['-I', ROOT,
+                           os.path.join(ROOT, 'df_dsp.c'),
                            os.path.join(ROOT, 'filter.c'), os.path.join(ROOT, 'ob1_vcf.c'),
                            os.path.join(ROOT, 'filter_dsp.s'),
                            os.path.join(ROOT, 'tests', 'df_bench.c'),
