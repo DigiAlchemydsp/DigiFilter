@@ -21,40 +21,36 @@ reimplements a stock mode.
 
 > Digitone **mk1 / Keys only**. Digitone II's machines are out of scope.
 
-## Status — 0.1i+thin
+## Status — 0.1i
 
-- **Audio:** BP/BP2 SVF + COMB/TRASH combs + OB4/OB2 ladder/2-pole. FREQ (the
-  render's envelope-modulated cutoff) / RESO (+ HARM/DAMP slots 65/26 for
-  COMB/TRASH). ENV/ADSR modulate all new types like stock. ASSUME 48 kHz +
-  slots savable (verify reload).
-- **TYPE list to 10** (0..9) with names. G turns past `LP4` to `OB2`.
-  (0.1b list to 8/10, 0.1a audio+names.)
-- **TYPE icons:** bell/wider/teeth/can/lowpass for 4..9 (full-outer clear in
-  0.1f, highlight at outer). Gaps acceptable per feedback.
-- **FREQ/RESO curve:** bell/teeth/lowpass (OB1_CURVE, no left taper for OB) for
-  4..9 (stock LP4 0..3). Shape open pending 1x scale=1 shots + FREQ/RESO values
-  for rectangular BP2 case.
-- **HARM/DAMP dials** p2 C/G (ENV-style, 0.1g) for COMB/TRASH (slots 65/26);
-  BASE/WIDTH stock always. OB uses FREQ/RESO (no HARM/DAMP, p2 stock).
-- Thin 5 files, shared DSP via `../` (no copies, integration in UI).
-- 6 sites, `ev_tick` 50 / `ev_draw` 40 / `ev_key,enc` 60. Model `OK`.
+- **Audio:** BP/BP2 SVF, COMB/TRASH combs, OB4/OB2 ladder/2-pole. FREQ (the
+  render's envelope-modulated cutoff) and RESO drive all new types; COMB/TRASH
+  use HARM/DAMP on slots 65/26. ENV/ADSR modulate FREQ like stock.
+- **TYPE list:** 0..9 with names. G turns past `LP4` to `OB2`.
+- **TYPE icons:** 17x17 bitmaps (bell, wider bell, teeth, can, lowpass) for 4..9.
+- **FREQ/RESO curve:** bell/teeth/lowpass for 4..9; stock curve for 0..3.
+- **HARM/DAMP:** page-2 C/G for COMB/TRASH (new params 182/183); BASE/WIDTH
+  stay stock. OB uses FREQ/RESO.
+- **Sites:** 6, `ev_tick` 50 / `ev_draw` 40 / `ev_key,enc` 60.
+- **Verified on hardware:** Digitone mk1, OS 1.44 — all six types, HARM and
+  DAMP work.
+
+### Known limits
+
+- 48 kHz is assumed (`COMB_DELAY = round(48000/Hz)`); slots 65/26 are assumed
+  savable. Save/reload and other sample rates are not verified.
+- OB4/OB2 are the most expensive modes; at high resonance they can reach the
+  DSP peak guardrail. TRASH can do the same with several voices.
+- Stock TYPE 0..3 still run the stock filter; stock byte-identity is expected
+  but not exhaustively checked on hardware.
+- Locks/polyphony/edge cases (TYPE 4..9 + params 182/183, LFO/MIDI CC -1,
+  presets, mode-change clicks) are not all covered yet.
 
 ## Credits
 
 - **Simon Johansson** (upstream PR #2) — OB4/OB2: OB-1 VCF ladder + 2-pole,
-  SPICE/model/kernel/checks (`docs/ob1.md` upstream). Ported to DN (TYPE
-  8,9, slots/FREQ/RESO base, curve/glyph lowpass, no envelope yet).
-
-### Known issues / TODO (next)
-
-- **Verify on device:** TYPE names/icons/curve for 4..9, HARM/DAMP dials
-  (0.1g pending; 0.1f showed labels with empty dotted), audio
-  BP/BP2/COMB/TRASH + OB (0.1i hardware-tested: all types, HARM and DAMP), stock
-  byte-identity 0..3, ENV/ADSR on all new types (emulator-verified, see
-  RE_NOTES_DN §5/§8), locks/polyphony/edge cases (TYPE 4..9 + 182/183,
-  LFO/MIDI CC -1, presets, 8-voice OB cost, mode-change clicks), photos.
-  Then `fwcheck` timing/margins, 1x screenshots, hardware photos.
-- Slots 65/26 savable ASSUME + 48kHz ASSUME (verify save/reload + rate).
+  SPICE/model/kernel/checks (`docs/ob1.md`). Ported to the DN (TYPE 8,9,
+  slots/FREQ/RESO base, curve/glyph lowpass; envelope modulation added).
 
 ## Controls
 
@@ -93,10 +89,8 @@ saves `MACSR/ACC0/ACCEXT01`).
 
 ## Building
 
-Needs m68k cross (`m68k-elf-`), an elekloader checkout (here
-`tools/elekloader/`, ignored, with own git), stock
-`Digitone_and_Digitone_Keys_OS1.43.syx` / `...1.44.syx` (ignored, never
-committed), and `core-dn1`.
+Needs the m68k cross toolchain (`m68k-elf-`), an elekloader checkout, the
+stock Digitone OS 1.43 / 1.44 `.syx` files, and `core-dn1`.
 
 ```sh
 export ELEKLOADER_CROSS=m68k-elf-
@@ -114,8 +108,8 @@ python3 -m elekloader.patch --stock <...OS1.43.syx> --mod <core-4.0.elemod> \
 
 Must print `BUILT`, `OK: links as core ...`, `OK: the mods combine`.
 Drop `--check` to write `test.syx`. Add `--with <machines-*.elemod>` /
-`--mod` to combine with machines (verified). Never flash from the repo dir;
-the unit recovers via stock `.syx` (bootloader untouched).
+`--mod` to combine with machines. Never flash from the build directory; the
+unit recovers via a stock `.syx` (bootloader untouched).
 
 ## Files
 
@@ -128,7 +122,7 @@ Thin DN (5 files) + shared via `../` (no copies):
 | `digifilter-dn/filter_ui.c` | `digifilter_dn_filt` (dispatcher globals + slots 54/55/56/65/26, TYPE base 4, base FREQ only) + UI (curve/glyphs/dials, `core_params` 182/183, `tick`/`enc`/`key`/`draw`) |
 | `digifilter-dn/README.md` | this file |
 | `digifilter-dn/RE_NOTES_DN.md` | RE notes (sites/slots/pages/verification) |
-| `../df_dsp.c/h` | shared SVF/comb math + state (firmware-free, 1.1a verbatim) |
+| `../df_dsp.c/h` | shared SVF/comb math + state (firmware-free, 1.1b) |
 | `../filter_dsp.s` | shared SVF EMAC (`digifilter_svf`) |
 | `../ob1_vcf.c/h` | shared OB-1 ladder |
 | `../filter_tables.h` / `../ob1_tables.h` | shared tables (`G27/K27/COMB_DELAY`, `OB1_CURVE`) |
