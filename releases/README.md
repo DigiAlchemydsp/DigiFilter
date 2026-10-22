@@ -3,13 +3,14 @@
 Prebuilt DigiFilter for the **Digitakt mk1, OS 1.53 and OS 1.54**.
 
 Published releases: [GitHub Releases](https://github.com/DigiAlchemydsp/DigiFilter/releases)
-(`v1.1a` is current / Latest).
+(`v1.1b` is current / Latest).
 
 | file | |
 |---|---|
-| `elemods/digifilter-1.1a.elemod` | the mod, **OS 1.53** (current) |
-| `elemods/digifilter-1.1a-os1.54.elemod` | the mod, **OS 1.54** |
-| `DigiFilter-1.1a.zip` | the release package: both elemods + `sources/` + README (install/build) + LICENSE |
+| `elemods/digifilter-1.1b.elemod` | the mod, **OS 1.53** (current) |
+| `elemods/digifilter-1.1b-os1.54.elemod` | the mod, **OS 1.54** |
+| `DigiFilter-1.1b.zip` | the release package: both elemods + `sources/` + README (install/build) + LICENSE |
+| `elemods/digifilter-1.1a.elemod`, `elemods/digifilter-1.1a-os1.54.elemod`, `DigiFilter-1.1a.zip` | the previous release |
 | `elemods/digifilter-1.1.elemod`, `DigiFilter-1.1.zip` | the previous release (OS 1.53) |
 | `elemods/digifilter-1.0k.elemod`, `DigiFilter-1.0k.zip` | an earlier release |
 | `elemods/digifilter-1.0j.elemod`, `DigiFilter-1.0j.zip`, `elemods/digifilter-1.0i.elemod`, `DigiFilter-1.0i.zip`, `elemods/digifilter-1.0h.elemod`, `DigiFilter-1.0h.zip` | earlier releases |
@@ -25,11 +26,31 @@ Install (OS 1.53; for 1.54 use the 1.54 stock, the `-os1.54` elemod and a 1.54
 
 ```sh
 python -m elekloader.patch --stock Digitakt_OS1.53.syx \
-    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.1a.elemod \
+    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.1b.elemod \
     --out Digitakt_OS1.53-digifilter.syx --version 2.0t
 ```
 
 Then flash the `.syx` with Elektron Transfer.
+
+New in 1.1b (wins and deltas vs the stock per-voice filter, ~2400 instructions
+per voice per 32-frame block):
+
+| type | instructions | vs stock | MCF54418 cycles |
+|---|---|---|---|
+| BP / BP2 (knobs held) | 1072 | **-55 %** | ~1300 |
+| BP / BP2 (cutoff swept) | 1635 | **-32 %** | ~2250 |
+| COMB / TRASH | 1693 | **-29 %** | ~2020 |
+| OB4 (RESO 64) | 3213 | +34 % | 4867 |
+| OB2 (RESO 64) | 3181 | +33 % | 4948 |
+| OB4 / OB2 (zero feedback) | ~1390 | **-42 %** |n/a |
+
+BP/BP2 and COMB/TRASH are now cheaper than the stock filter in every case. The
+SVF's only division is a precomputed table (no software divide), the comb's
+damping-off loop is specialized, and the OB ladder caches its coefficients and
+uses a 512-segment interpolated saturation table. Audio is bit-for-bit
+identical except the OB table, whose drift is bounded at ~-100 dBFS. Emulator
+verified; hardware testing is pending. See [../CHANGELOG.md](../CHANGELOG.md)
+and `../RE_NOTES.md` §15-16.
 
 New in 1.1a: a performance pass over the per-voice DSP — BP/BP2 recompute the
 state-variable filter's coefficients only when the cutoff/resonance move, so with
@@ -76,6 +97,7 @@ under `../` (see [../README.md](../README.md)).
 
 Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1). **1.1a** was
 tested on hardware (Digitakt mk1) on both **OS 1.53** and **OS 1.54**: PASS.
+**1.1b** is emulator-verified; hardware testing is pending.
 
 ## Credits
 
