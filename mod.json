@@ -9,6 +9,7 @@
  "device": "digitakt-mk1",
  "os": "1.53",
  "sources": [
+  "df_dsp.c",
   "filter.c",
   "ob1_vcf.c",
   "filter_dsp.s",

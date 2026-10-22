@@ -1,0 +1,86 @@
+{
+ "id": "digifilter-dn",
+ "version": "0.1i",
+ "ele3_version": "0.1i",
+ "title": "DigiFilter-DN",
+ "category": "Sound",
+ "author": "Digital Alchemy DSP",
+ "license": "GPL-2.0-or-later",
+ "description": "Extra per-track filter modes for the Digitone mk1/Keys (OS 1.43+1.44): BP, BP2, COMB, TRASH, OB4, OB2 as TYPE 4..9 on top of stock OFF/LP2/HP/LP4, using each voice's own FREQ/RESO. Widens TYPE range to 9, value-text list to 10 with names + TYPE-cell icons, runs extra DSP at the per-voice filter call (SVF/combs/OB-1 ladder); COMB/TRASH add HARM/DAMP on page-2 free C/G (new params, BASE/WIDTH stock always). Port of DigiFilter (Digitakt) incl. OB-1 (Simon Johansson).",
+ "device": "digitone-mk1",
+ "os": "1.43",
+ "sources": [
+  "../df_dsp.c",
+  "../filter_dsp.s",
+  "../ob1_vcf.c",
+  "filter_glue.s",
+  "filter_ui.c"
+ ],
+ "cflags": [
+  "-DPAGE2_C_AT=0x4136b69c",
+  "-DPAGE2_G_AT=0x4136b6ac"
+ ],
+ "defsym": {
+  "FILTER": "0x400984b6",
+  "FMT": "0x40014b6c",
+  "OFF_STR": "0x401d897b",
+  "LP2_STR": "0x401d88d0",
+  "HP_STR": "0x401d88d4",
+  "LP4_STR": "0x401d88d7"
+ },
+ "sites": [
+  {"addr": "0x4018d7dc", "stock": "00000300", "op": "bytes", "new": "00000900", "kind": "data"},
+  {"addr": "0x4018d804", "stock": "40014b6c", "op": "ptr", "target": "digifilter_dn_typefmt"},
+  {"addr": "0x4009e0b2", "stock": "068080004110", "op": "jsr", "target": "digifilter_dn_dispatch"},
+  {"addr": "0x4008859c", "stock": "7403", "op": "bytes", "new": "7409", "kind": "code"},
+  {"addr": "0x400885a2", "stock": "7003", "op": "bytes", "new": "7009", "kind": "code"},
+  {"addr": "0x400885a4", "stock": "41f9401a7290", "op": "bytes", "new": "41f900000000", "kind": "code", "relocs": [[2, "abs32", "sym:digifilter_dn_types", 0]]}
+ ],
+ "ports": {
+  "1.44": {
+   "cflags": [
+    "-DPAGE2_C_AT=0x4136c69c",
+    "-DPAGE2_G_AT=0x4136c6ac"
+   ],
+   "defsym": {
+    "FILTER": "0x400984d6",
+    "FMT": "0x40014b6c",
+    "OFF_STR": "0x401d8d4b",
+    "LP2_STR": "0x401d8ca0",
+    "HP_STR": "0x401d8ca4",
+    "LP4_STR": "0x401d8ca7"
+   },
+   "sites": [
+    {"addr": "0x4018db2c", "stock": "00000300", "op": "bytes", "new": "00000900", "kind": "data"},
+    {"addr": "0x4018db54", "stock": "40014b6c", "op": "ptr", "target": "digifilter_dn_typefmt"},
+    {"addr": "0x4009e0d2", "stock": "068080004110", "op": "jsr", "target": "digifilter_dn_dispatch"},
+    {"addr": "0x400885bc", "stock": "7403", "op": "bytes", "new": "7409", "kind": "code"},
+    {"addr": "0x400885c2", "stock": "7003", "op": "bytes", "new": "7009", "kind": "code"},
+    {"addr": "0x400885c4", "stock": "41f9401a75e0", "op": "bytes", "new": "41f900000000", "kind": "code", "relocs": [[2, "abs32", "sym:digifilter_dn_types", 0]]}
+   ]
+  }
+ },
+ "subscribe": [
+  {"event": "ev_tick", "fn": "digifilter_dn_tick", "order": 50},
+  {"event": "ev_draw", "fn": "digifilter_dn_draw", "order": 40},
+  {"event": "ev_key", "fn": "digifilter_dn_key", "order": 60},
+  {"event": "ev_enc", "fn": "digifilter_dn_enc", "order": 60}
+ ],
+ "contribute": [
+  {"to": "core_params", "order": 50, "data": "00000000",
+   "relocs": [[0, "abs32", "sym:digifilter_dn_harm", 0]]},
+  {"to": "core_params", "order": 51, "data": "00000000",
+   "relocs": [[0, "abs32", "sym:digifilter_dn_damp", 0]]}
+ ],
+ "requires": [
+  "core"
+ ],
+ "resources": {
+  "names": [
+   "sound:filter TYPE values (DigiFilter-DN modes)",
+   "param:182",
+   "param:183"
+  ],
+  "core": "3.1"
+ }
+}
