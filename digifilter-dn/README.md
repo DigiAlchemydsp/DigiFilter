@@ -21,7 +21,7 @@ reimplements a stock mode.
 
 > Digitone **mk1 / Keys only**. Digitone II's machines are out of scope.
 
-## Status — 0.1h+thin
+## Status — 0.1i+thin
 
 - **Audio:** BP/BP2 SVF + COMB/TRASH combs + OB4/OB2 ladder/2-pole. FREQ (the
   render's envelope-modulated cutoff) / RESO (+ HARM/DAMP slots 65/26 for
@@ -49,7 +49,7 @@ reimplements a stock mode.
 
 - **Verify on device:** TYPE names/icons/curve for 4..9, HARM/DAMP dials
   (0.1g pending; 0.1f showed labels with empty dotted), audio
-  BP/BP2/COMB/TRASH + OB (0.1h built after screenshots, untested), stock
+  BP/BP2/COMB/TRASH + OB (0.1i hardware-tested: all types, HARM and DAMP), stock
   byte-identity 0..3, ENV/ADSR on all new types (emulator-verified, see
   RE_NOTES_DN §5/§8), locks/polyphony/edge cases (TYPE 4..9 + 182/183,
   LFO/MIDI CC -1, presets, 8-voice OB cost, mode-change clicks), photos.
@@ -105,11 +105,11 @@ export PYTHONPATH="<elekloader checkout>"
 # 1.43 + 1.44
 python3 -m elekloader.sdk.build digifilter-dn --stock <...OS1.43.syx>
 python3 -m elekloader.sdk.build digifilter-dn --stock <...OS1.44.syx>
-python3 -m elekloader.lint digifilter-dn/out/digifilter-dn-0.1h.elemod \
+python3 -m elekloader.lint digifilter-dn/out/digifilter-dn-0.1i.elemod \
   --stock <...OS1.43.syx> --with <core-4.0.elemod>
 python3 -m elekloader.patch --stock <...OS1.43.syx> --mod <core-4.0.elemod> \
-  --mod digifilter-dn/out/digifilter-dn-0.1h.elemod --out test.syx \
-  --version 0.1h --check
+  --mod digifilter-dn/out/digifilter-dn-0.1i.elemod --out test.syx \
+  --version 0.1i --check
 ```
 
 Must print `BUILT`, `OK: links as core ...`, `OK: the mods combine`.
