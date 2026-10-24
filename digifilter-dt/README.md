@@ -40,12 +40,13 @@ their saved format is unchanged.
 
 The audio path is done and validated (BP / BP2 / COMB / TRASH and OB4 / OB2),
 including the filter envelope, the comb controls, the FLTR-page response curve
-and the TYPE-box icons. Version **1.2** is OS 1.54 only and pins core 4.0.
+and the TYPE-box icons. Version **1.3** is OS 1.54 only and pins core 4.0.
 
 **1.1a** passed hardware testing on a Digitakt mk1 on OS 1.53 and OS 1.54.
 **1.1b** is emulator-verified (bit-exact for BP/BP2 and COMB/TRASH; the OB
-saturation table is bounded at ~-100 dBFS). **1.2** reuses the 1.1b DSP; its
-UI icon/type-box change and core-4.0 build are pending hardware verification.
+saturation table is bounded at ~-100 dBFS). **1.2** reuses the 1.1b DSP;
+**1.3** rebuilds the same source for the unified two-machine package. The UI
+icon/type-box change and core-4.0 build are pending hardware verification.
 
 ## Known issues
 
@@ -121,8 +122,8 @@ export ELEKLOADER_CROSS=m68k-elf-
 export PYTHONPATH="<elekloader checkout>"
 
 python -m elekloader.sdk.build digifilter-dt --stock <Digitakt_OS1.54.syx>
-python -m elekloader.lint  out/digifilter-1.2.elemod --stock <Digitakt_OS1.54.syx> --with <core-4.0-os1.54.elemod>
-python -m elekloader.patch --stock <Digitakt_OS1.54.syx> --mod <core-4.0-os1.54.elemod> --mod out/digifilter-1.2.elemod --out custom.syx --version 1.2 --check
+python -m elekloader.lint  out/digifilter-1.3.elemod --stock <Digitakt_OS1.54.syx> --with <core-4.0-os1.54.elemod>
+python -m elekloader.patch --stock <Digitakt_OS1.54.syx> --mod <core-4.0-os1.54.elemod> --mod out/digifilter-1.3.elemod --out custom.syx --version 1.3 --check
 ```
 
 That must print `BUILT`, then `OK: links as core …`, then `OK: the mods
@@ -184,10 +185,11 @@ python tests/digiemu_filter_page2.py --digiemu <checkout> --fw <folder>
 
 Prebuilt packages live in [`../releases/`](../releases/README.md) and on the
 [GitHub Releases page](https://github.com/DigiAlchemydsp/DigiFilter/releases).
-The current package, **`DigiFilter-1.2.zip`**, carries one elemod per machine:
-`elemods/digifilter-1.2.elemod` for the Digitakt mk1 (OS 1.54) and
-`elemods/digifilter-dn-1.2.elemod` for the Digitone mk1/Keys (OS 1.44).
-`releases/elemods/` also keeps the older releases.
+The current package, **`DigiFilter-1.3.zip`**, carries one elemod per machine:
+`elemods/digifilter-1.3.elemod` for the Digitakt mk1 (OS 1.54) and
+`elemods/digifilter-dn-1.3.elemod` for the Digitone mk1/Keys (OS 1.44).
+`releases/elemods/` also keeps the older releases; the mixed 1.3 draft is
+archived under `releases/archive/1.3-mixed/`.
 
 ## Credits
 

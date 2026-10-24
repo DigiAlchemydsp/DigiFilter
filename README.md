@@ -49,11 +49,10 @@ python tools/build_release.py \
     --toolchain-bin <m68k-elf bin>
 ```
 
-The script builds the two elemods, lints and patch-checks both, stages them in
-`releases/elemods/`, writes local test `.syx` files under `out/`, and creates
-`releases/DigiFilter-1.3.zip`. The Digitakt source is unchanged from 1.2, so
-you can reuse its 1.2 elemod with `--dt-elemod` if you do not need to rebuild
-it. Override the cores with `--core-dt` / `--core-dn` if they live elsewhere.
+The script builds the two 1.3 elemods, lints and patch-checks both, stages them
+in `releases/elemods/`, writes local test `.syx` files under `out/`, and creates
+`releases/DigiFilter-1.3.zip`. Override the cores with `--core-dt` / `--core-dn`
+if they live elsewhere.
 
 Install with elekloader: add your stock OS, the matching core and the elemod,
 then build the custom `.syx` and flash it with Elektron Transfer.

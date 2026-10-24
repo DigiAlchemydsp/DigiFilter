@@ -11,13 +11,8 @@ builds made from the user's own stock files.
         --stock-dt <Digitakt_OS1.54.syx> \
         --stock-dn <Digitone_OS1.44.syx>
 
-The Digitakt source is unchanged from 1.2, so a prebuilt elemod can be reused
-without the Digitakt stock image:
-
-    python tools/build_release.py --elekloader <...> \
-        --dt-elemod <digifilter-1.2.elemod> --stock-dn <Digitone_OS1.44.syx>
-
-The matching cores are found next to the elekloader checkout by default:
+Both machines are built at the same version. The matching cores are found
+next to the elekloader checkout by default:
 core-4.0-os1.54.elemod and core-dn1-4.0-os1.44.elemod. Override with
 --core-dt/--core-dn. Set --toolchain-bin if m68k-elf-gcc is not on PATH.
 """
@@ -31,14 +26,12 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '1.3'                # release package version
-DT_VERSION = '1.2'             # Digitakt source/build is unchanged from 1.2
-DN_VERSION = '1.3'
-SYX_VERSION = '1.3a'           # the custom OS tag must be exactly 4 ASCII chars
+VERSION = '1.3'
+SYX_VERSION = '1.3a'          # the custom OS tag must be exactly 4 ASCII chars
 DT_MOD = 'digifilter-dt'
 DN_MOD = 'digifilter-dn'
-DT_ELEMOD = f'digifilter-{DT_VERSION}.elemod'
-DN_ELEMOD = f'digifilter-dn-{DN_VERSION}.elemod'
+DT_ELEMOD = f'digifilter-{VERSION}.elemod'
+DN_ELEMOD = f'digifilter-dn-{VERSION}.elemod'
 DT_CORE = f'core-4.0-os1.54.elemod'
 DN_CORE = f'core-dn1-4.0-os1.44.elemod'
 
@@ -135,8 +128,6 @@ def main():
                         help='elekloader checkout (0.5+); or $ELEKLOADER_ROOT')
     parser.add_argument('--stock-dt', help='Digitakt_OS1.54.syx; or $DT_STOCK')
     parser.add_argument('--stock-dn', help='Digitone_OS1.44.syx; or $DN_STOCK')
-    parser.add_argument('--dt-elemod',
-                        help=f'prebuilt Digitakt elemod to reuse instead of rebuilding {DT_ELEMOD}')
     parser.add_argument('--core-dt', help=f'{DT_CORE} (default: next to the checkout)')
     parser.add_argument('--core-dn', help=f'{DN_CORE} (default: next to the checkout)')
     parser.add_argument('--toolchain-bin', help='directory with m68k-elf-gcc')
@@ -148,18 +139,12 @@ def main():
     args = parser.parse_args()
 
     elekloader = arg_or_env(parser, args, 'elekloader', 'ELEKLOADER_ROOT', 'elekloader checkout')
+    stock_dt = arg_or_env(parser, args, 'stock_dt', 'DT_STOCK', 'Digitakt 1.54 stock .syx')
     stock_dn = arg_or_env(parser, args, 'stock_dn', 'DN_STOCK', 'Digitone 1.44 stock .syx')
-    reuse_dt = Path(args.dt_elemod).expanduser().resolve() if args.dt_elemod else None
-    if reuse_dt:
-        if not reuse_dt.is_file():
-            parser.error(f'--dt-elemod not found: {reuse_dt}')
-        stock_dt = None
-    else:
-        stock_dt = arg_or_env(parser, args, 'stock_dt', 'DT_STOCK', 'Digitakt 1.54 stock .syx')
     args.out = Path(args.out).expanduser().resolve()
     args.out.mkdir(parents=True, exist_ok=True)
 
-    core_dt = None if reuse_dt else find_core(elekloader, DT_CORE, args.core_dt)
+    core_dt = find_core(elekloader, DT_CORE, args.core_dt)
     core_dn = find_core(elekloader, DN_CORE, args.core_dn)
 
     env = os.environ.copy()
@@ -171,24 +156,17 @@ def main():
     if args.toolchain_bin:
         env['PATH'] = str(Path(args.toolchain_bin).expanduser().resolve()) + os.pathsep + env['PATH']
 
-    if reuse_dt:
-        print(f'reuse DT: {reuse_dt}')
-    else:
-        print(f'stock DT: {stock_dt}')
-        print(f'core  DT: {core_dt}')
+    print(f'stock DT: {stock_dt}')
+    print(f'core  DT: {core_dt}')
     print(f'stock DN: {stock_dn}')
     print(f'core  DN: {core_dn}')
 
     dt_elemod = args.out / DT_ELEMOD
     dn_elemod = args.out / DN_ELEMOD
-    if reuse_dt:
-        if reuse_dt != dt_elemod.resolve():
-            shutil.copy2(reuse_dt, dt_elemod)
-    else:
-        build_one(args, env, DT_MOD, stock_dt, core_dt, dt_elemod,
-                  args.out / f'digifilter-{DT_VERSION}-dt.syx')
+    build_one(args, env, DT_MOD, stock_dt, core_dt, dt_elemod,
+              args.out / f'digifilter-{VERSION}-dt.syx')
     build_one(args, env, DN_MOD, stock_dn, core_dn, dn_elemod,
-              args.out / f'digifilter-{DN_VERSION}-dn.syx')
+              args.out / f'digifilter-{VERSION}-dn.syx')
 
     staged = [stage_elemod(dt_elemod), stage_elemod(dn_elemod)]
     for path in staged:

@@ -26,15 +26,18 @@ Unified DigiFilter release: both machines now ship the same modes.
 - The repository is DigiFilter-only again. The Filter+FX modes (VOWEL/BANK/
   FOLD/CRUSH/RING/PHASER/FLANGER) and their DSP/tables/tests were removed;
   they belong to their own project.
-- The Digitakt elemod is unchanged from 1.2; the 1.3 package reuses it. The
-  Digitone build is `digifilter-dn-1.3.elemod`.
-- `tools/build_release.py` can reuse a prebuilt Digitakt elemod with
-  `--dt-elemod` when the Digitakt stock 1.54 image is not available.
+- Both machines are built at 1.3 from the same shared DSP source. The Digitakt
+  audio/UI code is unchanged from 1.2; only the build version is bumped so the
+  package is unified.
+- `tools/build_release.py` now requires both stock images and always builds a
+  matched pair, so a mixed-version package cannot be produced by accident.
 
 ### Releases
 
-- `DigiFilter-1.3.zip` carries `elemods/digifilter-1.2.elemod` (Digitakt 1.54)
+- `DigiFilter-1.3.zip` carries `elemods/digifilter-1.3.elemod` (Digitakt 1.54)
   and `elemods/digifilter-dn-1.3.elemod` (Digitone 1.44).
+- The earlier mixed 1.3 draft (Digitakt 1.2 + Digitone 1.3) is preserved under
+  `releases/archive/1.3-mixed/`.
 
 ## [1.2] - 2026-10-22
 
