@@ -1,16 +1,17 @@
 # releases
 
 Prebuilt DigiFilter for the **Digitakt mk1 (OS 1.54)** and **Digitone mk1 /
-Keys (OS 1.44)**. Latest OS only; one elemod per machine.
+Keys (OS 1.44)**. Both machines use the same modes (BP/BP2/COMB/TRASH/OB4/OB2).
+Latest OS only; one elemod per machine.
 
 Published releases: [GitHub Releases](https://github.com/DigiAlchemydsp/DigiFilter/releases)
-(`v1.2` is current / Latest).
+(`v1.3` is current / Latest).
 
 | file | |
 |---|---|
-| `elemods/digifilter-1.2.elemod` | the Digitakt mk1 mod, **OS 1.54** |
-| `elemods/digifilter-dn-1.2.elemod` | the Digitone mk1/Keys mod, **OS 1.44** |
-| `DigiFilter-1.2.zip` | the release package: both elemods + `sources/` + README + LICENSE |
+| `elemods/digifilter-1.2.elemod` | the Digitakt mk1 mod, **OS 1.54** (unchanged in 1.3) |
+| `elemods/digifilter-dn-1.3.elemod` | the Digitone mk1/Keys mod, **OS 1.44** (DigiFilter modes) |
+| `DigiFilter-1.3.zip` | the release package: both elemods + sources + README + LICENSE |
 | older elemods/zips | previous releases, kept for reference |
 
 Each elemod needs its matching core and stock OS file:
@@ -18,7 +19,7 @@ Each elemod needs its matching core and stock OS file:
 | machine | elemod | core | stock |
 |---|---|---|---|
 | Digitakt mk1 | `digifilter-1.2.elemod` | `core-4.0-os1.54.elemod` | `Digitakt_OS1.54.syx` |
-| Digitone mk1/Keys | `digifilter-dn-1.2.elemod` | `core-dn1-4.0-os1.44.elemod` | `Digitone_OS1.44.syx` |
+| Digitone mk1/Keys | `digifilter-dn-1.3.elemod` | `core-dn1-4.0-os1.44.elemod` | `Digitone_OS1.44.syx` |
 
 Install (repeat with the other machine's files):
 
@@ -26,21 +27,30 @@ Install (repeat with the other machine's files):
 python -m elekloader.patch --stock Digitakt_OS1.54.syx \
     --mod core-4.0-os1.54.elemod \
     --mod releases/elemods/digifilter-1.2.elemod \
-    --out Digitakt_OS1.54-digifilter.syx --version 1.2
+    --out Digitakt_OS1.54-digifilter.syx --version 1.3
+
+python -m elekloader.patch --stock Digitone_OS1.44.syx \
+    --mod core-dn1-4.0-os1.44.elemod \
+    --mod releases/elemods/digifilter-dn-1.3.elemod \
+    --out Digitone_OS1.44-digifilter.syx --version 1.3
 ```
 
 Then flash the `.syx` with Elektron Transfer.
 
-New in 1.2: a unified layout - `shared/` DSP, `digifilter-dt/` and
-`digifilter-dn/` adapters. Both mods target only the latest OS and require core
-4.0. The Digitakt side is DigiFilter (BP/BP2/COMB/TRASH/OB4/OB2); the Digitone
-side is Filter+FX (VOWEL/BANK/FOLD/CRUSH/RING/PHASER/FLANGER), with TYPE 4..10
-and VOWEL/BANK AUX1/AUX2 on page 2. On the Digitakt, the FLTR TYPE box now
-clears the full 17x17 cell and uses bitmap icons. The DT audio path is the 1.1b
-DSP.
+> **Note:** Using multiple COMB / TRASH filters will slow down your machine,
+> especially poly tracks on the Digitone. Watch and manage your levels when
+> adjusting and/or changing filter types.
 
-See [../CHANGELOG.md](../CHANGELOG.md) for the full history and the device
-READMEs for controls, performance and validation.
+New in 1.3: the Digitone now gets DigiFilter-DN with the same BP/BP2/COMB/
+TRASH/OB4/OB2 modes as the Digitakt (TYPE 4..9, HARM/DAMP on page 2, OB at 75%
+of RESO). Filter+FX is a separate project/repository and is no longer part of
+this release. The Digitone audio path is the shared 1.2 DSP; the Digitakt
+elemod is unchanged from 1.2. Both mods target only the latest OS and require
+core 4.0.
+
+The Filter+FX modes are maintained in their own project/repository. See
+[../CHANGELOG.md](../CHANGELOG.md) and the device READMEs for controls,
+performance and validation.
 
 The package contains the mods' own bytes only; no Elektron firmware. See
 [../LICENSE](../LICENSE). Rebuild with `tools/build_release.py` (see

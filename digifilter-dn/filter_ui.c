@@ -1,20 +1,44 @@
-/* Filter+FX-DN: FLTR graph/icons and per-voice filter integration. */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* DigiFilter-DN UI + integration: FLTR curve/glyphs/dials + per-voice filter.
+ *
+ * Thin port (5 files, shared DSP via ../shared, no copies): this file holds DN
+ * integration (digifilter_dn_filt: dispatcher globals + fw_voice_params slots
+ * 54 TYPE/55 FREQ/56 RESO/65 HARM/26 DAMP, TYPE base 4, FREQ via the render's
+ * envelope-modulated cutoff) plus UI
+ * (FLTR p1 curve/glyphs, p2 HARM/DAMP dials, tick/enc/key). DSP lives in
+ * ../shared/df_dsp.c (SVF/comb) + ../shared/filter_dsp.s (EMAC) +
+ * ../shared/ob1_vcf.c (ladder); tables via ../shared/filter_tables.h and
+ * ../shared/ob1_tables.h.
+ *
+ * UI: p1 curve (bell/teeth/lowpass OB1_CURVE, no left taper for OB) in 20..71,
+ * glyphs (bell/wider/teeth/can/lowpass) with full-outer clear in 78..92,
+ * dials (86,42 C HARM / 86,15 G DAMP, ENV-style) for COMB/TRASH; p2 C/G tick
+ * [35,0,182,0,36,37,183,0] for COMB/TRASH else stock (DEL/BASE/WIDTH stock
+ * always). HARM/DAMP params 182/183 group Filter slots 65/26 (savable ASSUME).
+ * BASE/WIDTH slots 62/63 stock always. FREQ is the dispatcher's captured
+ * render cutoff (ENV-modulated). Slots 65/26 + 48kHz ASSUME (verify on device).
+ *
+ * Gated on firmware state (active TYPE, FLTR p1 list[pos]==6, brain
+ * bottom==top, toast yield 90 ticks on chorded RECORD/STOP/PLAY). Tick
+ * re-arms only on change (track/TYPE/FREQ/RESO/page/enc highlight+expiry).
+ * Never takes events.
+ */
 #include "digitone-mk1/core3.h"
 
-#include "../shared/fx_dsp.h"
-#include "../shared/filter_tables.h"   /* G27/K27 for the response graph */
-#include "../shared/analog_tables.h"
-#include "../shared/mod_tables.h"
-
-#define FILLRECT fw_fillrect
+#include "../shared/df_dsp.h"
+#include "../shared/ob1_vcf.h"
+#include "../shared/filter_tables.h"
+#include "../shared/ob1_tables.h"
 
 #define FLTR_P1 6
 #define FLTR_P2 7
 
+/* Wide FREQ/RESO curve cell (bottom row, FREQ+RESO share wide display) */
 #define GX0 20
 #define GX1 71
 #define GY0 7
 #define GY1 23
+/* TYPE cell outer (15px, centre 86,15) + glyph interior */
 #define TBX0 77
 #define TBX1 93
 #define TBY0 7
@@ -40,21 +64,12 @@
 #define FS_TYPE 54
 #define FS_FREQ 55
 #define FS_RESO 56
-#define FS_AUX1 65
-#define FS_AUX2 26
+#define FS_BASE 62
+#define FS_WIDTH 63
+#define FS_HARM 65
+#define FS_DAMP 26
 
-#define FM_FIRST_TYPE 4
-#define FM_VOWEL  4
-#define FM_BANK   5
-#define FM_FOLD   6
-#define FM_CRUSH  7
-#define FM_RING   8
-#define FM_PHASER 9
-#define FM_FLANGER 10
-#define FM_LAST   10
-
-typedef int int32;
-typedef unsigned int uint32;
+enum { FM_BP = 4, FM_BP2, FM_COMB, FM_TRASH, FM_OB4, FM_OB2 };
 
 static void *df_brain;
 static uint32_t df_ticks;
@@ -65,7 +80,7 @@ static uint32_t df_enc_at;
 static int32_t df_trigs;
 static int32_t df_func, df_ptn, df_page, df_rec_down;
 static int32_t tick_valid;
-static int32_t tick_track, tick_type, tick_fi, tick_qi, tick_aux1, tick_aux2;
+static int32_t tick_track, tick_type, tick_fi, tick_qi, tick_harm, tick_damp;
 static int32_t tick_pos, tick_p2pos, tick_enc, tick_hl, tick_msg;
 
 static int32_t msg_sup(void)
@@ -73,33 +88,76 @@ static int32_t msg_sup(void)
     return (int32_t)(df_ticks - df_msg_until) < 0;
 }
 
-static int32_t curve[128];
-static int curve_transfer;
-
-static int clampi(int v, int lo, int hi)
+static int32_t clampi_ui(int32_t v, int32_t lo, int32_t hi)
 {
     return v < lo ? lo : v > hi ? hi : v;
 }
 
-static int32 mulsh(int32 a, int32 b, int sh)
+/* ---- TYPE glyphs: user-supplied 17x17 bitmaps (SVG sources live outside
+ * the repo in DigiFilter-ICONS/). Row 0 = bottom (screen y7).
+ * Bit x = column x (screen 77+x). Art covers 77..93/7..23. */
+static const unsigned BP_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x10FE1, 0x10FE1, 0x10FE1, 0x10FE1, 0x10FE1, 0x107C1, 0x107C1, 0x107C1, 0x107C1, 0x10381, 0x10381, 0x10381, 0x10101, 0x0FFFE,
+};
+static const unsigned BP2_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x13FF9, 0x13FF9, 0x13FF9, 0x11FF1, 0x11FF1, 0x10FE1, 0x10FE1, 0x107C1, 0x10381, 0x10101, 0x0FFFE,
+};
+static const unsigned COMB_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x0FFFE,
+};
+static const unsigned TRASH_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x13FF9, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12009, 0x17FFD, 0x10381, 0x10001, 0x10001, 0x0FFFE,
+};
+static const unsigned OB4_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x10FFD, 0x10FFD, 0x10FFD, 0x107FD, 0x107FD, 0x107FD, 0x103FD, 0x103FD, 0x103FD, 0x10381, 0x10381, 0x10381, 0x10381, 0x10381, 0x0FFFE,
+};
+static const unsigned OB2_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x13FFD, 0x11FFD, 0x10FFD, 0x107FD, 0x103FD, 0x10381, 0x10381, 0x10381, 0x10381, 0x10381, 0x0FFFE,
+};
+/* ---- TYPE glyphs (17x17 bitmaps, 77..93/7..23) ---- */
+static void type_glyph(void *bmp, int32_t mode)
 {
-    uint32 ua = a < 0 ? -(uint32)a : (uint32)a, ub = b < 0 ? -(uint32)b : (uint32)b;
-    uint32 al = ua & 0xffff, ah = ua >> 16, bl = ub & 0xffff, bh = ub >> 16;
-    uint32 ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
-    uint32 mid = (ll >> 16) + (lh & 0xffff) + (hl & 0xffff);
-    uint32 lo = (ll & 0xffff) | (mid << 16);
-    uint32 hi = hh + (lh >> 16) + (hl >> 16) + (mid >> 16);
+    const unsigned *g;
+    int32_t r;
+    if (mode == FM_BP) g = BP_GLYPH;
+    else if (mode == FM_BP2) g = BP2_GLYPH;
+    else if (mode == FM_COMB) g = COMB_GLYPH;
+    else if (mode == FM_TRASH) g = TRASH_GLYPH;
+    else if (mode == FM_OB4) g = OB4_GLYPH;
+    else g = OB2_GLYPH;
+    fw_fillrect(bmp, TBX0, TBY0, TBX1, TBY1, 0);
+    for (r = 0; r < 17; r++) {
+        unsigned rowbits = g[r];
+        int32_t xx;
+        for (xx = 0; xx < 17; xx++)
+            if (rowbits & (1u << xx))
+                fw_fillrect(bmp, TBX0 + xx, TBY0 + r, TBX0 + xx, TBY0 + r, 1);
+    }
+}
+
+
+/* ---- FREQ/RESO curve (DT build_curve, DN wide cell 25..67) ---- */
+static int32_t curve[128];
+
+static int32_t mulsh_ui(int32_t a, int32_t b, int32_t sh)
+{
+    uint32_t ua = a < 0 ? -(uint32_t)a : (uint32_t)a, ub = b < 0 ? -(uint32_t)b : (uint32_t)b;
+    uint32_t al = ua & 0xffff, ah = ua >> 16, bl = ub & 0xffff, bh = ub >> 16;
+    uint32_t ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
+    uint32_t mid = (ll >> 16) + (lh & 0xffff) + (hl & 0xffff);
+    uint32_t lo = (ll & 0xffff) | (mid << 16);
+    uint32_t hi = hh + (lh >> 16) + (hl >> 16) + (mid >> 16);
     if ((a < 0) != (b < 0)) {
         lo = ~lo + 1;
         hi = ~hi + (lo == 0);
     }
-    return (int32)((hi << (32 - sh)) | (lo >> sh));
+    return (int32_t)((hi << (32 - sh)) | (lo >> sh));
 }
 
-static uint32 udivq16(uint32 x, uint32 y)     /* floor(x * 65536 / y) */
+static uint32_t udivq16_ui(uint32_t x, uint32_t y)
 {
-    uint32 rem = x, q = 0;
-    int i;
+    uint32_t rem = x, q = 0;
+    int32_t i;
     for (i = 0; i < 16; i++) {
         rem <<= 1;
         q <<= 1;
@@ -111,7 +169,7 @@ static uint32 udivq16(uint32 x, uint32 y)     /* floor(x * 65536 / y) */
     return q;
 }
 
-static const unsigned short LOG2Q8[256] = {
+static const unsigned short LOG2Q8_UI[256] = {
     0, 3, 6, 8, 11, 14, 16, 19, 22, 24, 27, 29, 32, 34, 37, 39,
     42, 45, 47, 50, 52, 54, 57, 59, 62, 64, 67, 69, 71, 74, 76, 78,
     81, 83, 85, 88, 90, 92, 94, 97, 99, 101, 103, 105, 108, 110, 112, 114,
@@ -130,257 +188,165 @@ static const unsigned short LOG2Q8[256] = {
     418, 419, 420, 421, 423, 424, 425, 426, 427, 429, 430, 431, 432, 433, 434, 436,
 };
 
-static int log2q8(uint32 v)
+static int32_t log2q8_ui(uint32_t v)
 {
-    int p = 31;
-    uint32 m;
+    int32_t p = 31;
+    uint32_t m;
     while (!(v >> p))
         p--;
     m = p >= 8 ? v >> (p - 8) : v << (8 - p);
-    return p * 256 + LOG2Q8[m & 255];
+    return p * 256 + LOG2Q8_UI[m & 255];
 }
 
-/* One SVF band's magnitude at frequency step x, in half-dB, for centre fi and
- * K27 row ek (same formula as DigiFilter's BP curve). */
-static int bp_db2(int fi, int qi, int x)
+static int32_t bp_db2_ui(int32_t fi, int32_t qi, int32_t x, int32_t wide)
 {
-    int32 g = G27[fi];
-    int32 k = K27[qi] >> 11;
-    int32 G = G27[x], t, num, den, n, d;
+    int32_t g = wide ? G27[fi] << 1 : G27[fi];
+    int32_t k = (K27[wide ? (qi >> 1) : qi] >> 11) * (wide ? 1 : 3) / (wide ? 2 : 4);
+    int32_t G = G27[x], t, num, den, n, d;
     if (G <= g)
-        t = udivq16(G, (uint32)g);
+        t = (int32_t)udivq16_ui((uint32_t)G, (uint32_t)g);
     else
-        t = udivq16((uint32)g, G);
-    num = mulsh(k, t, 16);
-    den = (1 << 16) - mulsh(t, t, 16);
+        t = (int32_t)udivq16_ui((uint32_t)g, (uint32_t)G);
+    num = mulsh_ui(k, t, 16);
+    den = (1 << 16) - mulsh_ui(t, t, 16);
     if (den < 0)
         den = -den;
-    n = mulsh(num, num, 16);
-    d = mulsh(den, den, 16) + n;
+    n = mulsh_ui(num, num, 16);
+    d = mulsh_ui(den, den, 16) + n;
+    if (n <= 0)
+        return -200;
     if (d <= 0)
-        return 0;
-    /* half-dB, 0 at the band centre: the Q16 ratio has a 16-bit (160
-     * half-dB) offset that must come off before combining bands. */
-    return (int)((log2q8((uint32)(num * num)) - log2q8((uint32)d)) * 10 / 256) - 160;
+        return 200;
+    return ((log2q8_ui((uint32_t)n) - log2q8_ui((uint32_t)d)) * 1541 + 32768) >> 16;
 }
 
-#define CH (GY1 - GY0 - 4)
+static const short COS15_UI[256] = {
+     32767,  32757,  32728,  32678,  32609,  32521,  32412,  32285,
+     32137,  31971,  31785,  31580,  31356,  31113,  30852,  30571,
+     30273,  29956,  29621,  29268,  28898,  28510,  28105,  27683,
+     27245,  26790,  26319,  25832,  25329,  24811,  24279,  23731,
+     23170,  22594,  22005,  21403,  20787,  20159,  19519,  18868,
+     18204,  17530,  16846,  16151,  15446,  14732,  14010,  13279,
+     12539,  11793,  11039,  10278,   9512,   8739,   7962,   7179,
+      6393,   5602,   4808,   4011,   3212,   2410,   1608,    804,
+         0,   -804,  -1608,  -2410,  -3212,  -4011,  -4808,  -5602,
+     -6393,  -7179,  -7962,  -8739,  -9512, -10278, -11039, -11793,
+    -12539, -13279, -14010, -14732, -15446, -16151, -16846, -17530,
+    -18204, -18868, -19519, -20159, -20787, -21403, -22005, -22594,
+    -23170, -23731, -24279, -24811, -25329, -25832, -26319, -26790,
+    -27245, -27683, -28105, -28510, -28898, -29268, -29621, -29956,
+    -30273, -30571, -30852, -31113, -31356, -31580, -31785, -31971,
+    -32137, -32285, -32412, -32521, -32609, -32678, -32728, -32757,
+    -32767, -32757, -32728, -32678, -32609, -32521, -32412, -32285,
+    -32137, -31971, -31785, -31580, -31356, -31113, -30852, -30571,
+    -30273, -29956, -29621, -29268, -28898, -28510, -28105, -27683,
+    -27245, -26790, -26319, -25832, -25329, -24811, -24279, -23731,
+    -23170, -22594, -22005, -21403, -20787, -20159, -19519, -18868,
+    -18204, -17530, -16846, -16151, -15446, -14732, -14010, -13279,
+    -12539, -11793, -11039, -10278,  -9512,  -8739,  -7962,  -7179,
+     -6393,  -5602,  -4808,  -4011,  -3212,  -2410,  -1608,   -804,
+         0,    804,   1608,   2410,   3212,   4011,   4808,   5602,
+      6393,   7179,   7962,   8739,   9512,  10278,  11039,  11793,
+     12539,  13279,  14010,  14732,  15446,  16151,  16846,  17530,
+     18204,  18868,  19519,  20159,  20787,  21403,  22005,  22594,
+     23170,  23731,  24279,  24811,  25329,  25832,  26319,  26790,
+     27245,  27683,  28105,  28510,  28898,  29268,  29621,  29956,
+     30273,  30571,  30852,  31113,  31356,  31580,  31785,  31971,
+     32137,  32285,  32412,  32521,  32609,  32678,  32728,  32757,
+};
 
-/* FOLD: the triangle transfer curve, drive from FREQ and bias from RESO. */
-static void build_fold_curve(int fi, int qi)
+static int32_t comb_mag_ui(int32_t c, int32_t g)
 {
-    const int32 F = 1 << 27;
-    int drive = 1 + fi * 7 / 127;
-    int32 bias = (int32)(qi - 64) << 21;
-    int x;
+    int32_t gc = mulsh_ui(g, c, 15);
+    int32_t den = (1 << 15) + mulsh_ui(g, g, 15) - 2 * gc;
+    int32_t l;
+    if (den < 0)
+        den = -den;
+    if (den < 1)
+        den = 1;
+    l = log2q8_ui((uint32_t)den);
+    if (l > 4600)
+        l = 4600;
+    return 4600 - l;
+}
+
+#define TOOTH_Q_UI (5 << 12)
+#define comb_dstep_ui(fi) (TOOTH_Q_UI + (fi) * ((64 << 12) - TOOTH_Q_UI) / 127)
+
+static int32_t comb_db2_ui(int32_t fi, int32_t fb, int32_t x)
+{
+    int32_t idx = ((x * comb_dstep_ui(fi)) >> 12) & 255;
+    return comb_mag_ui(COS15_UI[idx], fb * 235);
+}
+
+static int32_t trash_db2_ui(int32_t fi, int32_t fb, int32_t x)
+{
+    int32_t idx = ((x * comb_dstep_ui(fi) * 3 / 2) >> 12) & 255;
+    return comb_mag_ui(COS15_UI[idx], fb * 130);
+}
+
+static int32_t col2step_ui(int32_t x)
+{
+    return (x - GX0 - 1) * 127 / (GX1 - GX0 - 2);
+}
+
+#define CH_UI (GY1 - GY0 - 4)
+
+static int32_t curve_lowpass_ui;
+
+#define OB_FLOOR2_UI (-72)
+#define OB_SPAN2_UI 108
+static void ob_curve_ui(int32_t mode, int32_t fi, int32_t qi)
+{
+    const signed char (*c)[129] = OB1_CURVE[mode == FM_OB2];
+    int32_t lvl = qi >> 4, span = lvl < 7 ? 16 : 15, frac = qi - 16 * lvl, x;
+    fi = OB1_POSITION[fi];   /* cutoff on the graph's log-frequency axis (upstream calibration) */
     for (x = 0; x < 128; x++) {
-        int32 in = (int32)(x - 64) << 21;
-        int32 v = in * drive + bias;
-        uint32 u = (uint32)v & (4u * F - 1);
-        if (u > 2u * F)
-            u = 4u * F - u;
-        curve[x] = ((int32)u >> 22) * CH / 128;
+        int32_t d = clampi_ui(x - fi + 64, 0, 128);
+        int32_t v = c[lvl][d] + (c[lvl + 1][d] - c[lvl][d]) * frac / span;
+        curve[x] = CH_UI * clampi_ui(v - OB_FLOOR2_UI, 0, OB_SPAN2_UI) / OB_SPAN2_UI;
     }
 }
 
-/* CRUSH: the quantisation staircase, bit depth from RESO. */
-static void build_crush_curve(int qi)
+static void build_curve_ui(int32_t mode, int32_t fi, int32_t qi)
 {
-    int bits = 16 - qi * 15 / 127;
-    int shift = 30 - bits;
-    int x;
-    for (x = 0; x < 128; x++) {
-        int32 in = (int32)(x - 64) << 24;
-        int32 q = (in >> shift) << shift;
-        curve[x] = ((q >> 24) + 64) * CH / 128;
-    }
-}
-
-/* RING: the carrier * modulator waveform. PHASER: a chirped sine (the swirl).
- * FLANGER: a rectified sine (the jet/comb). These are pictures, not responses. */
-static void build_mod_curve(int mode, int fi, int qi)
-{
-    int x, depth = qi * 258;
-    for (x = 0; x < 128; x++) {
-        int v;
-        if (mode == FM_RING) {
-            int c = SINE_Q15[(x * 4) & 255];
-            int m = SINE_Q15[(x * (2 + fi / 16)) & 255];
-            int r = mulsh(c, m, 15);
-            v = c + mulsh(r - c, depth, 15);
-            curve[x] = (v + 32768) * CH / 65536;
-        } else if (mode == FM_PHASER) {
-            v = SINE_Q15[((x * x) / 3 + fi * 2) & 255];
-            curve[x] = CH / 2 + (v * (CH / 2)) / 32768;
-        } else {
-            int s = SINE_Q15[(x * 4 + fi * 2) & 255];
-            if (s < 0)
-                s = -s;
-            curve[x] = s * CH / 32768;
-        }
-    }
-}
-
-/* VOWEL: formant bells; BANK: four shifted bells; FOLD/CRUSH: transfer curves. */
-static void build_curve(int mode, int fi, int qi)
-{
-    static const int vdb2[4] = { 0, -4, -9, -20 };
-    curve_transfer = 0;
-    if (mode >= FM_RING) {
-        curve_transfer = 1;
-        build_mod_curve(mode, fi, qi);
+    int32_t x, pass;
+    curve_lowpass_ui = (mode == FM_OB4 || mode == FM_OB2);
+    if (mode == FM_OB4 || mode == FM_OB2) {
+        ob_curve_ui(mode, fi, qi);
         return;
     }
-    if (mode == FM_FOLD) {
-        curve_transfer = 1;
-        build_fold_curve(fi, qi);
-        return;
-    }
-    if (mode == FM_CRUSH) {
-        curve_transfer = 1;
-        build_crush_curve(qi);
-        return;
-    }
-    int ek = 8 + qi * 7 / 127;
-    int banks = (mode == FM_FIRST_TYPE) ? VOWEL_N : BANK_N;
-    int pos[4], db[4], b, x, pass;
-    if (mode == FM_FIRST_TYPE) {
-        for (b = 0; b < VOWEL_N; b++) {
-            pos[b] = VOWEL_FI8[b][fi] >> 8;
-            db[b] = vdb2[b];
+    if (mode == FM_COMB || mode == FM_TRASH) {
+        int32_t base = (mode == FM_COMB) ? 240 : 120;
+        for (x = 0; x < 128; x++) {
+            int32_t v = (mode == FM_COMB) ? comb_db2_ui(fi, qi, x)
+                                          : trash_db2_ui(fi, qi, x);
+            int32_t d = v - base;
+            curve[x] = CH_UI * (d < 0 ? 0 : d > 1500 ? 1500 : d) / 1500;
         }
     } else {
-        int shift = (fi - 64) * 12 / 64;
-        for (b = 0; b < BANK_N; b++) {
-            pos[b] = clampi((BANK_BASE_FI8[b] >> 8) + shift, 0, 127);
-            db[b] = 0;
+        int32_t depth = CH_UI * (5 + qi) / 20;
+        for (x = 0; x < 128; x++) {
+            int32_t d = bp_db2_ui(fi, qi, x, mode == FM_BP2);
+            if (d > 0)
+                d = 0;
+            curve[x] = depth * 50 / (50 - d);
         }
-    }
-    for (x = 0; x < 128; x++) {
-        int best = -0x7fff;
-        for (b = 0; b < banks; b++) {
-            int d = bp_db2(pos[b], ek, x) + db[b];
-            if (d > best)
-                best = d;
-        }
-        if (best > 0)
-            best = 0;
-        curve[x] = CH * 50 / (50 - best);
-    }
-    for (pass = 0; pass < 3; pass++) {
-        int32 prev = curve[0];
-        for (x = 1; x < 127; x++) {
-            int32 cur = curve[x];
-            curve[x] = (prev + 2 * cur + curve[x + 1]) / 4;
-            prev = cur;
+        for (pass = 0; pass < 3; pass++) {
+            int32_t prev = curve[0];
+            for (x = 1; x < 127; x++) {
+                int32_t cur = curve[x];
+                curve[x] = (prev + 2 * cur + curve[x + 1]) / 4;
+                prev = cur;
+            }
         }
     }
 }
 
-static int curve_y(int s, int v)
+static int32_t curve_y_ui(int32_t s, int32_t v)
 {
-    int w;
-    if (curve_transfer)
-        return GY0 + 2 + v;
-    w = (s < 8) ? s : (s > 119) ? (127 - s) : 8;
+    int32_t w = (s < 8 && !curve_lowpass_ui) ? s : (s > 119) ? (127 - s) : 8;
     return GY0 + 2 + v * w / 8;
-}
-
-static void type_glyph(void *bmp, int mode)
-{
-    int x, cx = (TBX0 + TBX1) / 2, top = TBY0 + 1, bot = TBY1 - 1, h = bot - top;
-    FILLRECT(bmp, TBX0, TBY0, TBX1, TBY1, 0);
-    if (mode == FM_FIRST_TYPE) {                 /* a mouth */
-        int y0 = top + 3, y1 = bot - 2;
-        FILLRECT(bmp, cx - 5, y0, cx + 5, y0, 1);
-        FILLRECT(bmp, cx - 6, y0 + 1, cx + 6, y0 + 1, 1);
-        FILLRECT(bmp, cx - 5, y1, cx + 5, y1, 1);
-        FILLRECT(bmp, cx - 4, y1 + 1, cx + 4, y1 + 1, 1);
-        FILLRECT(bmp, cx - 4, y0 + 2, cx + 4, y1 - 1, 0);
-        for (x = cx - 3; x <= cx + 3; x += 2)
-            FILLRECT(bmp, x, y0 + 2, x, y0 + 3, 1);
-    } else if (mode == FM_FIRST_TYPE + 1) {      /* a robot */
-        FILLRECT(bmp, cx, top, cx, top + 1, 1);
-        FILLRECT(bmp, cx - 1, top + 2, cx + 1, top + 2, 1);
-        FILLRECT(bmp, cx - 5, top + 3, cx + 5, top + 3, 1);
-        FILLRECT(bmp, cx - 6, top + 4, cx - 6, bot - 1, 1);
-        FILLRECT(bmp, cx + 6, top + 4, cx + 6, bot - 1, 1);
-        FILLRECT(bmp, cx - 5, bot, cx + 5, bot, 1);
-        FILLRECT(bmp, cx - 4, top + 5, cx - 3, top + 6, 1);
-        FILLRECT(bmp, cx + 3, top + 5, cx + 4, top + 6, 1);
-        for (x = cx - 4; x <= cx + 4; x += 2)
-            FILLRECT(bmp, x, bot - 2, x, bot - 1, 1);
-    } else if (mode == FM_FOLD) {                /* a folded wave */
-        for (x = TBX0 + 1; x < TBX1; x++) {
-            int t = (x - TBX0 - 1) % 8, v = t < 4 ? t : 8 - t;
-            int y = top + v * h / 4;
-            FILLRECT(bmp, x, y, x, y + 1, 1);
-        }
-    } else if (mode == FM_RING) {                /* a ringed planet */
-        static const unsigned char half[7] = { 1, 2, 3, 3, 3, 2, 1 };
-        int cy = (top + bot) / 2, dy;
-        for (dy = -3; dy <= 3; dy++)
-            FILLRECT(bmp, cx - half[dy + 3], cy + dy, cx + half[dy + 3], cy + dy, 1);
-        for (dy = -1; dy <= 1; dy += 2) {
-            FILLRECT(bmp, cx - 6, cy + dy, cx - 3, cy + dy, 1);
-            FILLRECT(bmp, cx + 3, cy + dy, cx + 6, cy + dy, 1);
-        }
-    } else if (mode == FM_PHASER) {              /* an open square spiral */
-        static const signed char sx[10] = { 0, 2, 2, -2, -2, 4, 4, -4, -4, 6 };
-        static const signed char sy[10] = { 0, 0, 2, 2, -2, -2, 4, 4, -4, -4 };
-        int i, py = (top + bot) / 2;
-        for (i = 1; i < 10; i++) {
-            int x0 = cx + sx[i - 1], y0 = py + sy[i - 1];
-            int x1 = cx + sx[i], y1 = py + sy[i];
-            if (x0 == x1) {
-                int lo = y0 < y1 ? y0 : y1, hi = y0 < y1 ? y1 : y0, y;
-                for (y = lo; y <= hi; y++)
-                    if (y >= top && y <= bot)
-                        FILLRECT(bmp, x0, y, x0, y, 1);
-            } else {
-                int lo = x0 < x1 ? x0 : x1, hi = x0 < x1 ? x1 : x0, xx;
-                for (xx = lo; xx <= hi; xx++)
-                    if (xx >= TBX0 + 1 && xx <= TBX1 - 1)
-                        FILLRECT(bmp, xx, y0, xx, y0, 1);
-            }
-        }
-    } else if (mode == FM_FLANGER) {             /* three waves / jet */
-        int row;
-        for (row = 0; row < 3; row++)
-            for (x = TBX0 + 1; x < TBX1; x++) {
-                int s = SINE_Q15[(x * 9 + row * 80) & 255];
-                int y = top + 3 + row * 3 + (s * 3) / 32768;
-                FILLRECT(bmp, x, y, x, y + 1, 1);
-            }
-    } else {                                     /* Pac-Man */
-        static const unsigned char half[11] = { 2, 4, 5, 5, 6, 6, 6, 5, 5, 4, 2 };
-        int cy = (top + bot) / 2, dy;
-        for (dy = -5; dy <= 5; dy++)
-            FILLRECT(bmp, cx - half[dy + 5], cy + dy, cx + half[dy + 5], cy + dy, 1);
-        for (dy = -1; dy <= 1; dy++)
-            FILLRECT(bmp, cx, cy + dy, cx + 6, cy + dy, 0);
-        FILLRECT(bmp, cx - 2, cy - 3, cx - 1, cy - 3, 0);   /* eye */
-    }
-}
-
-
-
-static int32_t active_type(void)
-{
-    int32_t t = fw_active_track;
-    uint8_t *kit = fw_kit;
-    if (t < 0 || t > 3 || !kit)
-        return -1;
-    return FW_SOUND_SLOT(kit, t, FS_TYPE) >> 8;
-}
-
-static int32_t aux_val(int32_t slot)
-{
-    int32_t t = fw_active_track;
-    uint8_t *kit = fw_kit;
-    if (t < 0 || t > 3 || !kit)
-        return 0;
-    return clampi((FW_SOUND_SLOT(kit, t, slot) >> 8) & 0xff, 0, 127);
 }
 
 static int32_t read_track_ui(int32_t *mode, int32_t *fi, int32_t *qi)
@@ -390,16 +356,40 @@ static int32_t read_track_ui(int32_t *mode, int32_t *fi, int32_t *qi)
     if (!kit || t < 0 || t > 3)
         return 0;
     ty = FW_SOUND_SLOT(kit, t, FS_TYPE) >> 8;
-    if (ty < FM_FIRST_TYPE || ty > FM_LAST)
+    if (ty < FM_BP || ty > FM_OB2)
         return 0;
     *mode = ty;
-    *fi = clampi((FW_SOUND_SLOT(kit, t, FS_FREQ) >> 8) & 0xff, 0, 127);
-    *qi = clampi((FW_SOUND_SLOT(kit, t, FS_RESO) >> 8) & 0xff, 0, 127);
+    *fi = clampi_ui((FW_SOUND_SLOT(kit, t, FS_FREQ) >> 8) & 0xff, 0, 127);
+    if (*mode == FM_COMB || *mode == FM_TRASH || *mode == FM_OB4 || *mode == FM_OB2)
+        *qi = clampi_ui((FW_SOUND_SLOT(kit, t, FS_RESO) >> 8) & 0xff, 0, 127);
+    else
+        *qi = clampi_ui(FW_SOUND_SLOT(kit, t, FS_RESO) >> 11, 0, 15) * 13 / 15;
+    if (*mode == FM_OB4 || *mode == FM_OB2)      /* the OB ladder uses 75% of RESO */
+        *qi = ob1_reso_depth(*qi);
     return 1;
 }
 
-/* ---- second page: AUX1/AUX2 (params 182/183) for VOWEL/BANK ---- */
-static void aux_fmt(int32_t v, char *buf)
+/* ---- HARM/DAMP params (ids 182/183, slots 65/26, C/G on page-2) ----
+ * BASE/WIDTH (ids 36/37 slots 62/63 E/F) stay stock always (base filter
+ * always accessible). HARM/DAMP live on free C/G (blank squares) with stock
+ * dial widgets (slots within model, unlike DT spare past range which needed
+ * painted dials). Slots: 65 globally free (savable ASSUME), 26 free on synth
+ * (Delay WID group 5 + MIDI CC group 11 use it elsewhere). No mirroring
+ * needed if DN serializer saves 0..78 (ASSUME, verify on device like DT). */
+static void harm_fmt(int32_t v, char *buf)
+{
+    int32_t r = v >> 8, d, i = 0;
+    char t[4];
+    int32_t n = 0;
+    if (r < 0) r = 0;
+    if (r > 127) r = 127;
+    d = 1 + r * 3 / 127;
+    do { t[n++] = (char)('0' + d % 10); d /= 10; } while (d && n < 3);
+    while (n) buf[i++] = t[--n];
+    buf[i] = 0;
+}
+
+static void damp_fmt(int32_t v, char *buf)
 {
     int32_t r = v >> 8, i = 0;
     char t[4];
@@ -411,73 +401,167 @@ static void aux_fmt(int32_t v, char *buf)
     buf[i] = 0;
 }
 
-static const char df_aux1_name[] = "Aux 1";
-static const char df_aux2_name[] = "Aux 2";
-static const char df_aux_group[] = "Filter";
-static const char df_aux1_short[] = "AUX1";
-static const char df_aux2_short[] = "AUX2";
+static const char df_harm_name[] = "Harmonics";
+static const char df_harm_group[] = "Filter";
+static const char df_harm_short[] = "HARM";
+static const char df_damp_name[] = "Damping";
+static const char df_damp_group[] = "Filter";
+static const char df_damp_short[] = "DAMP";
 
-const struct core_param digifilter_dn_aux1 = {
-    182, 2, FS_AUX1, 0, 0x7f00, 0, 0, -1, -1, -1, 0,
-    df_aux1_name, df_aux_group, df_aux1_short,
-    aux_fmt, fw_str_empty, 36,
+const struct core_param digifilter_dn_harm = {
+    182, 2, 65, 0, 0x7f00, 0, 0, -1, -1, -1, 0,
+    df_harm_name, df_harm_group, df_harm_short,
+    harm_fmt, fw_str_empty, 36,
 };
 
-const struct core_param digifilter_dn_aux2 = {
-    183, 2, FS_AUX2, 0, 0x7f00, 0, 0, -1, -1, -1, 0,
-    df_aux2_name, df_aux_group, df_aux2_short,
-    aux_fmt, fw_str_empty, 37,
+const struct core_param digifilter_dn_damp = {
+    183, 2, 26, 0, 0x7f00, 0, 0, -1, -1, -1, 0,
+    df_damp_name, df_damp_group, df_damp_short,
+    damp_fmt, fw_str_empty, 37,
 };
 
-static const char df_size_short[] = "SIZE";
-static const char df_f4_short[] = "F4";
-static const char df_sprd_short[] = "SPRD";
-static const char df_tilt_short[] = "TILT";
-
-static const char *aux_name(int32_t id, int32_t field)
-{
-    int32_t ty;
-    if (field != 0x30)
-        return 0;
-    ty = active_type();
-    if (id == 182) {
-        if (ty == FM_VOWEL) return df_size_short;
-        if (ty == FM_BANK) return df_sprd_short;
-    } else if (id == 183) {
-        if (ty == FM_VOWEL) return df_f4_short;
-        if (ty == FM_BANK) return df_tilt_short;
-    }
-    return 0;
-}
-
-const struct core_param_override df_aux_override = { 0, aux_name };
-
+/* Page-2 C/G addrs (RAM page record ids, per OS via -DPAGE2_C_AT/-DPAGE2_G_AT).
+ * Stock [35,0,0,0,36,37,0,0] -> comb [35,0,182,0,36,37,183,0] (C=HARM,G=DAMP,
+ * E/F BASE/WIDTH stock always). Tick rewrites C/G (no sites, like DT). */
 #ifndef PAGE2_C_AT
-#error "PAGE2_C_AT: page-2 C id addr (0x4136c69c on 1.44)"
+#error "PAGE2_C_AT: page-2 C id addr (0x4136b69c 1.43, 0x4136c69c 1.44)"
 #endif
 #ifndef PAGE2_G_AT
-#error "PAGE2_G_AT: page-2 G id addr (0x4136c6ac on 1.44)"
+#error "PAGE2_G_AT: page-2 G id addr (0x4136b6ac 1.43, 0x4136c6ac 1.44)"
 #endif
+
+static int32_t active_type(void)
+{
+    int32_t t = fw_active_track;
+    uint8_t *kit = fw_kit;
+    if (t < 0 || t > 3 || !kit)
+        return -1;
+    return FW_SOUND_SLOT(kit, t, FS_TYPE) >> 8;
+}
 
 static void page2_setup(void)
 {
     int32_t ty = active_type();
-    int32_t own = (ty == FM_VOWEL || ty == FM_BANK);
+    int32_t comb = (ty == FM_COMB || ty == FM_TRASH);
     volatile uint32_t *c = (volatile uint32_t *)PAGE2_C_AT;
     volatile uint32_t *g = (volatile uint32_t *)PAGE2_G_AT;
-    if (*c != (uint32_t)(own ? 182 : 0))
-        *c = (uint32_t)(own ? 182 : 0);
-    if (*g != (uint32_t)(own ? 183 : 0))
-        *g = (uint32_t)(own ? 183 : 0);
+    if (*c != (uint32_t)(comb ? 182 : 0))
+        *c = (uint32_t)(comb ? 182 : 0);
+    if (*g != (uint32_t)(comb ? 183 : 0))
+        *g = (uint32_t)(comb ? 183 : 0);
 }
 
-/* ---- view gating: find both FLTR pages in one walk ---- */
-static void fltr_views(void *ctrl, void **p1, void **p2)
+/* ---- per-voice filter (DN integration, no DSP state here) ----
+ * The render calls the per-voice filter through a5; the dispatcher
+ * (filter_glue.s) points a5 here for TYPE 4..9. Reads voice/buffer/cutoff from
+ * dispatcher globals and RESO/HARM/DAMP from fw_voice_params (render's
+ * copy, locks included). Ignores the stock stack args. Runs shared DSP
+ * (../shared/df_dsp.c + ../shared/filter_dsp.s + ../shared/ob1_vcf.c) in
+ * place; stock types never
+ * reach here. FREQ is the render's envelope-modulated cutoff (captured by the
+ * dispatcher), so ENV/ADSR modulate all new types like the stock ones. DSP
+ * state lives in the shared core; this file keeps only the mode-change
+ * detector. */
+extern int digifilter_dn_voice;
+extern int digifilter_dn_buf;
+extern int digifilter_dn_cut;
+static int dn_prev_type[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static int dn_sounding[8];
+
+void digifilter_dn_filt(void)
+{
+    int voice = digifilter_dn_voice;
+    int32 *buf = (int32 *)digifilter_dn_buf;
+    int cut, type, fi, i;
+    if (voice < 0 || voice >= 8 || !buf)
+        return;
+    /* Per-voice cost guard: the render dispatches all 8 voices every block,
+     * idle or not, and an idle voice hands us 32 zero samples. Running the
+     * filter on that is pure wasted work, and 8x of it overruns the audio
+     * block budget (all 8 idle voices on an OB type froze the panel with an
+     * empty pattern). Skip silent voices and drop their state once, so the
+     * next note starts clean and a 4-voice chord only pays for 4 voices. */
+    for (i = 0; i < 32; i++)
+        if (buf[i])
+            break;
+    if (i == 32) {
+        if (dn_sounding[voice]) {
+            df_reset(voice);
+            ob1_vcf_reset(voice);
+            dn_sounding[voice] = 0;
+        }
+        return;
+    }
+    dn_sounding[voice] = 1;
+    type = (FW_VOICE_PARAM(voice, FS_TYPE) >> 8) & 0xff;
+    if (type < FM_BP || type > FM_OB2)
+        return;
+    /* The render's own cutoff for this voice/block: FREQ (slot 55) plus the
+     * filter envelope (ENV slot 57 and the voice's envelope level), clamped
+     * to 0..0x7f000000 and captured by the dispatcher in d7. It is what the
+     * stock filter consumes, so the new types use it too and ENV modulates
+     * them exactly as it does LP/HP. fi (0..127) and fi8 (0..127<<8) are the
+     * same scales the shared DSP already takes. */
+    cut = digifilter_dn_cut;
+    fi = df_clampi((cut >> 24) & 0xff, 0, 127);
+    if (dn_prev_type[voice] != type) {
+        df_reset(voice);
+        ob1_vcf_reset(voice);
+        dn_prev_type[voice] = type;
+    }
+    if (type <= FM_BP2) {
+        int qi = df_clampi(FW_VOICE_PARAM(voice, FS_RESO) >> 11, 0, 15);
+        df_svf_run(type - FM_BP, fi, qi, buf, voice);
+    } else if (type <= FM_TRASH) {
+        int fb = df_clampi((FW_VOICE_PARAM(voice, FS_RESO) >> 8) & 0xff, 0, 127);
+        int harm = df_clampi((FW_VOICE_PARAM(voice, FS_HARM) >> 8) & 0xff, 0, 127);
+        int damp = FW_VOICE_PARAM(voice, FS_DAMP);
+        int hdiv = 1 + harm * 3 / 127;
+        int div = (type == FM_COMB) ? 1 : 2;
+        df_comb_run(buf, 32, fi, fb, voice, div, hdiv, damp);
+    } else {
+        int fi8 = df_clampi(cut >> 16, 0, 127 << 8);
+        int qio = df_clampi((FW_VOICE_PARAM(voice, FS_RESO) >> 8) & 0xff, 0, 127);
+        ob1_vcf_run((type == FM_OB4) ? OB1_TAP4 : OB1_TAP2, fi8,
+                    ob1_reso_depth(qio), (int *)buf, voice);
+    }
+}
+
+/* ---- TYPE persistence (stock temp save resets TYPE > 3) ----
+ * Mirror TYPE 4..9 into the low byte of BASE (slot 62, a stock savable 8.8
+ * param) and restore it on the next UI tick after a load. */
+static int dn_type_enc;
+static int32_t dn_last_type[4] = { -1, -1, -1, -1 };
+
+static void dn_persist_type(void)
+{
+    uint8_t *kit = fw_kit;
+    int32_t t;
+    if (!kit)
+        return;
+    for (t = 0; t < 4; t++) {
+        int32_t type = (FW_SOUND_SLOT(kit, t, FS_TYPE) >> 8) & 0xff;
+        int32_t base = FW_SOUND_SLOT(kit, t, FS_BASE);
+        int32_t lo = base & 0xff;
+        if (dn_type_enc) {
+            core_sound_set(t, FS_BASE, (base & 0xff00) | type);
+        } else if (type <= 3 && lo >= FM_BP && lo <= FM_OB2) {
+            core_sound_set(t, FS_TYPE, lo << 8);
+            type = lo;
+        } else if (type != dn_last_type[t]) {
+            core_sound_set(t, FS_BASE, (base & 0xff00) | type);
+        }
+        dn_last_type[t] = type;
+    }
+    dn_type_enc = 0;
+}
+
+/* ---- view/page gating ---- */
+static void *fltr_p1_view(void *ctrl)
 {
     char *node, *sent;
-    *p1 = *p2 = 0;
     if (!ctrl)
-        return;
+        return 0;
     sent = CTRL_SENT(ctrl);
     for (node = CTRL_HEAD(ctrl); node && node != sent; node = NODE_NEXT(node)) {
         void *view = NODE_VIEW(node);
@@ -490,114 +574,74 @@ static void fltr_views(void *ctrl, void **p1, void **p2)
         if (!v || pos < 0 || pos >= e - v)
             continue;
         if (v[pos] == FLTR_P1)
-            *p1 = view;
-        else if (v[pos] == FLTR_P2)
-            *p2 = view;
+            return view;
     }
+    return 0;
 }
 
-/* ---- per-voice filter (dispatcher globals + fw_voice_params) ---- */
-extern int digifilter_dn_voice;
-extern int digifilter_dn_buf;
-extern int digifilter_dn_cut;
-static int dn_sounding[8];
-
-void digifilter_dn_filt(void)
+/* ---- ev handlers ---- */
+static void *fltr_p2_view(void *ctrl)
 {
-    int voice = digifilter_dn_voice;
-    int32 *buf = (int32 *)digifilter_dn_buf;
-    volatile int16_t *vp;
-    int cut, type, fi, qi, a1, a2, i;
-    if (voice < 0 || voice >= 8 || !buf)
-        return;
-    vp = &fw_voice_params[9 + 79 * voice];
-    for (i = 0; i < 32; i++)
-        if (buf[i])
-            break;
-    if (i == 32) {
-        if (dn_sounding[voice]) {
-            fx_reset(voice);
-            dn_sounding[voice] = 0;
-        }
-        return;
+    char *node, *sent;
+    if (!ctrl)
+        return 0;
+    sent = CTRL_SENT(ctrl);
+    for (node = CTRL_HEAD(ctrl); node && node != sent; node = NODE_NEXT(node)) {
+        void *view = NODE_VIEW(node);
+        int32_t *v, *e, pos;
+        if (!view)
+            continue;
+        v = VIEW_LIST(view);
+        e = VIEW_END(view);
+        pos = VIEW_POS(view);
+        if (!v || pos < 0 || pos >= e - v)
+            continue;
+        if (v[pos] == FLTR_P2)
+            return view;
     }
-    dn_sounding[voice] = 1;
-    type = (vp[FS_TYPE] >> 8) & 0xff;
-    if (type < FM_FIRST_TYPE || type > FM_LAST)
-        return;
-    cut = digifilter_dn_cut;
-    fi = (cut >> 24) & 0xff;
-    qi = (unsigned short)vp[FS_RESO] >> 8;
-    a1 = (unsigned short)vp[FS_AUX1] >> 8;
-    a2 = (unsigned short)vp[FS_AUX2] >> 8;
-    if (qi > 127) qi = 127;
-    if (a1 > 127) a1 = 127;
-    if (a2 > 127) a2 = 127;
-    fx_run(type - FM_FIRST_TYPE, fi, qi, a1, a2, (int *)buf, voice);
+    return 0;
 }
 
-/* ---- TYPE persistence (stock temp save resets TYPE > 3) ---- */
-static int dn_type_enc;
-static int32_t dn_last_type[4] = { -1, -1, -1, -1 };
-
-static void dn_persist_type(void)
-{
-    uint8_t *kit = fw_kit;
-    int32_t t;
-    if (!kit)
-        return;
-    for (t = 0; t < 4; t++) {
-        int32_t type = (FW_SOUND_SLOT(kit, t, FS_TYPE) >> 8) & 0xff;
-        int32_t base = FW_SOUND_SLOT(kit, t, 62);
-        int32_t lo = base & 0xff;
-        if (dn_type_enc) {
-            core_sound_set(t, 62, (base & 0xff00) | type);
-        } else if (type <= 3 && lo >= 4 && lo <= 10) {
-            core_sound_set(t, 54, lo << 8);
-            type = lo;
-        } else if (type != dn_last_type[t]) {
-            core_sound_set(t, 62, (base & 0xff00) | type);
-        }
-        dn_last_type[t] = type;
-    }
-    dn_type_enc = 0;
-}
-
-/* ---- dials on page 2 ---- */
-static void dial_px(void *bmp, int32_t x, int32_t y)
+#define DIAL_R_UI 8
+static void dial_px_ui(void *bmp, int32_t x, int32_t y)
 {
     fw_fillrect(bmp, x, y, x, y, 1);
 }
 
-#define DIAL_R_UI 8
-static void draw_dial(void *bmp, int32_t cx, int32_t cy, int32_t v)
+/* Stock-style round dial (like ENV on p1 H): circle + needle from 0..127
+ * sweeping lower-left to lower-right through up. Centres (86,42) C top HARM,
+ * (86,15) G bottom DAMP (17px cells, pedal col_x/ROW_Y bitmap bottom=0). */
+static void draw_dial_ui(void *bmp, int32_t cx, int32_t cy, int32_t v)
 {
     int32_t x = DIAL_R_UI, y = 0, e = 0;
     while (x >= y) {
-        dial_px(bmp, cx + x, cy + y); dial_px(bmp, cx + y, cy + x);
-        dial_px(bmp, cx - y, cy + x); dial_px(bmp, cx - x, cy + y);
-        dial_px(bmp, cx - x, cy - y); dial_px(bmp, cx - y, cy - x);
-        dial_px(bmp, cx + y, cy - x); dial_px(bmp, cx + x, cy - y);
+        dial_px_ui(bmp, cx + x, cy + y); dial_px_ui(bmp, cx + y, cy + x);
+        dial_px_ui(bmp, cx - y, cy + x); dial_px_ui(bmp, cx - x, cy + y);
+        dial_px_ui(bmp, cx - x, cy - y); dial_px_ui(bmp, cx - y, cy - x);
+        dial_px_ui(bmp, cx + y, cy - x); dial_px_ui(bmp, cx + x, cy - y);
         y++;
-        if (e <= 0) e += 2 * y + 1;
-        if (e > 0) { x--; e -= 2 * x + 1; }
+        if (e <= 0)
+            e += 2 * y + 1;
+        if (e > 0) {
+            x--;
+            e -= 2 * x + 1;
+        }
     }
     {
-        int32_t idx = 192 + v * 213 / 127;
-        int32_t dx = (SINE_Q15[idx & 255] * DIAL_R_UI) >> 15;
-        int32_t dy = (SINE_Q15[(idx + 64) & 255] * DIAL_R_UI) >> 15;
+        int32_t idx = (v - 64) * 200 / 127;
+        int32_t dx = (COS15_UI[(idx - 64) & 255] * DIAL_R_UI) >> 15;
+        int32_t dy = (COS15_UI[idx & 255] * DIAL_R_UI) >> 15;
         int32_t k;
         for (k = 1; k <= DIAL_R_UI; k++)
-            dial_px(bmp, cx + dx * k / DIAL_R_UI, cy + dy * k / DIAL_R_UI);
+            dial_px_ui(bmp, cx + dx * k / DIAL_R_UI, cy + dy * k / DIAL_R_UI);
     }
 }
 
 void digifilter_dn_draw(void *bmp, void *ctrl)
 {
-    static int32_t curve_mode = -1, curve_fi = -1, curve_qi = -1;
     int32_t mode, fi, qi, x, t;
     uint8_t *kit;
-    void *p1, *p2, *bottom, *top;
+    void *view, *bottom, *top;
     if (!bmp || !df_brain)
         return;
     bottom = *(void *volatile *)((uint8_t *)df_brain + BRAIN_BOT);
@@ -609,22 +653,16 @@ void digifilter_dn_draw(void *bmp, void *ctrl)
     t = fw_active_track;
     if (t < 0 || t > 3 || !(kit = fw_kit))
         return;
-    fltr_views(ctrl, &p1, &p2);
-    if (p1) {
+    if (fltr_p1_view(ctrl)) {
         if (!read_track_ui(&mode, &fi, &qi))
             return;
         fw_fillrect(bmp, GX0 + 1, GY0 + 1, GX1 - 1, GY1 - 1, 0);
-        if (mode != curve_mode || fi != curve_fi || qi != curve_qi) {
-            build_curve(mode, fi, qi);
-            curve_mode = mode;
-            curve_fi = fi;
-            curve_qi = qi;
-        }
+        build_curve_ui(mode, fi, qi);
         {
             int32_t prev = -1;
             for (x = GX0 + 1; x < GX1; x++) {
-                int32_t s = (x - GX0 - 1) * 127 / (GX1 - GX0 - 2);
-                int32_t y = curve_y(s, curve[s]);
+                int32_t s = col2step_ui(x);
+                int32_t y = curve_y_ui(s, curve[s]);
                 if (prev < 0)
                     prev = y;
                 fw_fillrect(bmp, x, prev < y ? prev : y, x, prev < y ? y : prev, 1);
@@ -632,17 +670,25 @@ void digifilter_dn_draw(void *bmp, void *ctrl)
             }
         }
         type_glyph(bmp, mode);
-        if (df_enc == 6 && (int32_t)(df_ticks - df_enc_at) < 45)
+        if (df_enc == 6 && (int32_t)(df_ticks - df_enc_at) < 45) {
             fw_framerect(bmp, TBX0, TBY0, TBX1, TBY1, 1);
+        }
         return;
     }
-    if (p2) {
+    if (fltr_p2_view(ctrl)) {
         int32_t ty = FW_SOUND_SLOT(kit, t, FS_TYPE) >> 8;
-        if (ty != FM_VOWEL && ty != FM_BANK)
+        int32_t harm, damp;
+        if (ty != FM_COMB && ty != FM_TRASH)
             return;
-        draw_dial(bmp, 86, 42, aux_val(FS_AUX1));
-        draw_dial(bmp, 86, 15, aux_val(FS_AUX2));
+        harm = clampi_ui((FW_SOUND_SLOT(kit, t, 65) >> 8) & 0xff, 0, 127);
+        damp = clampi_ui((FW_SOUND_SLOT(kit, t, 26) >> 8) & 0xff, 0, 127);
+        draw_dial_ui(bmp, 86, 42, harm);
+        draw_dial_ui(bmp, 86, 15, damp);
+        return;
     }
+    (void)view;
+    (void)bottom;
+    (void)top;
 }
 
 int digifilter_dn_key(void *brain, void *ev)
@@ -654,13 +700,19 @@ int digifilter_dn_key(void *brain, void *ev)
         return 0;
     id = *(volatile int32_t *)((const uint8_t *)ev + 12);
     fl = *(volatile int32_t *)((const uint8_t *)ev + 16);
-    if (id == K_FUNC) df_func = !(fl & 0x10);
-    else if (id == K_PTN) df_ptn = !(fl & 0x10);
-    else if (id == K_PAGE) df_page = !(fl & 0x10);
-    if (id == K_REC) df_rec_down = !(fl & 0x10);
+    if (id == K_FUNC)
+        df_func = !(fl & 0x10);
+    else if (id == K_PTN)
+        df_ptn = !(fl & 0x10);
+    else if (id == K_PAGE)
+        df_page = !(fl & 0x10);
+    if (id == K_REC)
+        df_rec_down = !(fl & 0x10);
     if (id >= 26 && id <= 41) {
-        if (fl & 0x10) df_trigs &= ~(1u << (uint32_t)(id - 26));
-        else df_trigs |= 1u << (uint32_t)(id - 26);
+        if (fl & 0x10)
+            df_trigs &= ~(1u << (uint32_t)(id - 26));
+        else
+            df_trigs |= 1u << (uint32_t)(id - 26);
     } else if (id >= 20 && id <= 25 && (fl & 1)) {
         df_trigs = 0;
     }
@@ -695,15 +747,14 @@ int digifilter_dn_enc(void *brain, void *ev)
 
 void digifilter_dn_tick(void *ctrl)
 {
-    int32_t t = fw_active_track, ty, hl, msg, dirty = 0;
-    int32_t pos = -1, p2pos = -1, fi = 0, qi = 0, a1 = 0, a2 = 0;
+    int32_t t = fw_active_track, ty = active_type(), hl, msg, dirty = 0;
+    int32_t pos = -1, p2pos = -1, fi = 0, qi = 0, harm = 0, damp = 0;
     void *view, *view2;
     uint8_t *kit;
     df_ticks++;
     if (!ctrl)
         return;
     dn_persist_type();
-    ty = active_type();
     if (df_brain) {
         void *b = *(void *volatile *)((uint8_t *)df_brain + BRAIN_BOT);
         void *tp = *(void *volatile *)((uint8_t *)df_brain + BRAIN_TOP);
@@ -717,21 +768,28 @@ void digifilter_dn_tick(void *ctrl)
         tick_valid = 0;
         return;
     }
-    if (ty >= FM_FIRST_TYPE && ty <= FM_LAST) {
-        fi = clampi((FW_SOUND_SLOT(kit, t, FS_FREQ) >> 8) & 0xff, 0, 127);
-        qi = clampi((FW_SOUND_SLOT(kit, t, FS_RESO) >> 8) & 0xff, 0, 127);
-        a1 = clampi((FW_SOUND_SLOT(kit, t, FS_AUX1) >> 8) & 0xff, 0, 127);
-        a2 = clampi((FW_SOUND_SLOT(kit, t, FS_AUX2) >> 8) & 0xff, 0, 127);
+    if (ty >= FM_BP && ty <= FM_OB2) {
+        fi = clampi_ui((FW_SOUND_SLOT(kit, t, FS_FREQ) >> 8) & 0xff, 0, 127);
+        if (ty == FM_COMB || ty == FM_TRASH || ty == FM_OB4 || ty == FM_OB2) {
+            qi = clampi_ui((FW_SOUND_SLOT(kit, t, FS_RESO) >> 8) & 0xff, 0, 127);
+            if (ty == FM_COMB || ty == FM_TRASH) {
+                harm = clampi_ui((FW_SOUND_SLOT(kit, t, 65) >> 8) & 0xff, 0, 127);
+                damp = clampi_ui((FW_SOUND_SLOT(kit, t, 26) >> 8) & 0xff, 0, 127);
+            }
+        } else {
+            qi = clampi_ui(FW_SOUND_SLOT(kit, t, FS_RESO) >> 11, 0, 15);
+        }
     }
-    fltr_views(ctrl, &view, &view2);
+    view = fltr_p1_view(ctrl);
     if (view)
         pos = VIEW_POS(view);
+    view2 = fltr_p2_view(ctrl);
     if (view2)
         p2pos = VIEW_POS(view2);
     hl = df_enc >= 0 && (int32_t)(df_ticks - df_enc_at) < 45;
     msg = msg_sup();
     if (!tick_valid || t != tick_track || ty != tick_type || fi != tick_fi ||
-        qi != tick_qi || a1 != tick_aux1 || a2 != tick_aux2 ||
+        qi != tick_qi || harm != tick_harm || damp != tick_damp ||
         pos != tick_pos || p2pos != tick_p2pos || df_enc != tick_enc ||
         hl != tick_hl || msg != tick_msg)
         dirty = 1;
@@ -742,8 +800,8 @@ void digifilter_dn_tick(void *ctrl)
     tick_type = ty;
     tick_fi = fi;
     tick_qi = qi;
-    tick_aux1 = a1;
-    tick_aux2 = a2;
+    tick_harm = harm;
+    tick_damp = damp;
     tick_pos = pos;
     tick_p2pos = p2pos;
     tick_enc = df_enc;

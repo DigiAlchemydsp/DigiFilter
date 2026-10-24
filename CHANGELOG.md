@@ -5,6 +5,37 @@ All notable changes to DigiFilter. Format-2
 **Digitakt mk1 (OS 1.54)** and **Digitone mk1/Keys (OS 1.44)**. Versioned as
 `<major>.<minor><letter>`.
 
+## [1.3] - 2026-10-24
+
+Unified DigiFilter release: both machines now ship the same modes.
+
+### Added
+
+- **Digitone mk1/Keys DigiFilter-DN**: BP, BP2, COMB, TRASH, OB4 and OB2 as
+  TYPE 4..9, with the shared SVF/comb/OB-1 DSP, per-voice FREQ/RESO and filter
+  envelope, HARM/DAMP on page-2 free C/G for COMB/TRASH, FLTR response curve
+  and TYPE-box icons.
+- **DN TYPE persistence**: TYPE 4..9 is mirrored into the low byte of BASE (a
+  stock savable 8.8 param) and restored on the next UI tick, so FUNC+YES /
+  FUNC+NO keeps the selected mode.
+- **DN OB resonance scaling**: OB4/OB2 use 75% of the RESO 0..127 travel, the
+  same as the Digitakt build; the drawn curve uses the same depth.
+
+### Changed
+
+- The repository is DigiFilter-only again. The Filter+FX modes (VOWEL/BANK/
+  FOLD/CRUSH/RING/PHASER/FLANGER) and their DSP/tables/tests were removed;
+  they belong to their own project.
+- The Digitakt elemod is unchanged from 1.2; the 1.3 package reuses it. The
+  Digitone build is `digifilter-dn-1.3.elemod`.
+- `tools/build_release.py` can reuse a prebuilt Digitakt elemod with
+  `--dt-elemod` when the Digitakt stock 1.54 image is not available.
+
+### Releases
+
+- `DigiFilter-1.3.zip` carries `elemods/digifilter-1.2.elemod` (Digitakt 1.54)
+  and `elemods/digifilter-dn-1.3.elemod` (Digitone 1.44).
+
 ## [1.2] - 2026-10-22
 
 Unified latest-OS release: one elemod per machine, built from one shared DSP

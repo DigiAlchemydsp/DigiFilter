@@ -1,17 +1,18 @@
 {
  "id": "digifilter-dn",
- "version": "1.2",
- "ele3_version": "1.2",
- "title": "Filter+FX-DN",
+ "version": "1.3",
+ "ele3_version": "1.3",
+ "title": "DigiFilter-DN",
  "category": "Sound",
  "author": "Digital Alchemy DSP",
  "license": "GPL-2.0-or-later",
- "description": "Filter+FX for the Digitone mk1/Keys (OS 1.44): VOWEL, BANK, FOLD, CRUSH, RING, PHASER and FLANGER as TYPE 4..10 on top of stock OFF/LP2/HP/LP4, using each voice's own FREQ/RESO and filter envelope. VOWEL/BANK add two controls on page-2 free C/G (params 182/183). Runs the DSP at the per-voice filter call; draws the FLTR graph and TYPE-box icons from ev_draw. Stock TYPE 0..3 still runs the stock multimode filter. Port of DigiFilter/Filter+FX (Digitakt).",
+ "description": "Per-voice filter modes for the Digitone mk1/Keys (OS 1.44): BP, BP2, COMB, TRASH, OB4 and OB2 as TYPE 4..9 on top of stock OFF/LP2/HP/LP4, using each voice's own FREQ/RESO and filter envelope. Widens the TYPE range to 9 and the value-text list to 10 with names and TYPE-box icons, runs the shared DigiFilter DSP at the per-voice filter call, and adds HARM/DAMP on page-2 free C/G for COMB/TRASH (params 182/183). The FLTR page draws the FREQ/RESO response curve and the 17x17 TYPE-box icon. Stock TYPE 0..3 still runs the stock multimode filter. Same modes as DigiFilter for the Digitakt; OB-1 by Simon Johansson.",
  "device": "digitone-mk1",
  "os": "1.44",
  "sources": [
-  "../shared/fx_dsp.c",
-  "../shared/biquad_dsp.s",
+  "../shared/df_dsp.c",
+  "../shared/filter_dsp.s",
+  "../shared/ob1_vcf.c",
   "filter_glue.s",
   "filter_ui.c"
  ],
@@ -32,7 +33,7 @@
    "addr": "0x4018db2c",
    "stock": "00000300",
    "op": "bytes",
-   "new": "00000a00",
+   "new": "00000900",
    "kind": "data"
   },
   {
@@ -51,14 +52,14 @@
    "addr": "0x400885bc",
    "stock": "7403",
    "op": "bytes",
-   "new": "740a",
+   "new": "7409",
    "kind": "code"
   },
   {
    "addr": "0x400885c2",
    "stock": "7003",
    "op": "bytes",
-   "new": "700a",
+   "new": "7009",
    "kind": "code"
   },
   {
@@ -108,7 +109,7 @@
     [
      0,
      "abs32",
-     "sym:digifilter_dn_aux1",
+     "sym:digifilter_dn_harm",
      0
     ]
    ]
@@ -121,20 +122,7 @@
     [
      0,
      "abs32",
-     "sym:digifilter_dn_aux2",
-     0
-    ]
-   ]
-  },
-  {
-   "to": "core_param_override",
-   "order": 50,
-   "data": "00000000",
-   "relocs": [
-    [
-     0,
-     "abs32",
-     "sym:df_aux_override",
+     "sym:digifilter_dn_damp",
      0
     ]
    ]
@@ -145,7 +133,7 @@
  ],
  "resources": {
   "names": [
-   "sound:filter TYPE values (Filter+FX-DN modes)",
+   "sound:filter TYPE values (DigiFilter-DN modes)",
    "param:182",
    "param:183"
   ],
