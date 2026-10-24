@@ -1,5 +1,5 @@
 | Digi Filter: the raw site entry points.
-| Firmware addresses are OS 1.53's (RE_NOTES.md).
+| Firmware addresses are OS 1.54's (RE_NOTES.md).
 
         .section .run, "ax"
 
@@ -8,7 +8,7 @@
 | The stock formatter is called with its arguments as
 |   (?, value<<8, char *dst)   -- value at 8(%sp), dst at 0xc(%sp)
 | and prints "OFF"/"LP"/"HP" for values 0..2 and "EQ:%d" (value-2) for 3..7.
-| We return our mode names for TYPE 8..11 and pass everything else to the stock
+| We return our mode names for TYPE 8..13 and pass everything else to the stock
 | formatter untouched.
         .balign 2
         .globl  digifilter_typefmt
@@ -55,7 +55,7 @@ nf_names:
 | Instead mod.json hooks the free 6-byte instruction just before the call,
 |        0x400780ba   add.l #0x80001a18,%d0     (buffer = 0x80001a18 + voice*0x80)
 | with a jsr here. We do that instruction's work, then, in the loop each voice,
-| point a3 at our filter only for our TYPE values (8..11); for stock types we
+| point a3 at our filter only for our TYPE values (8..13); for stock types we
 | restore the original a3 (digihealth's wrapper, or the stock function), so
 | digihealth keeps working. On entry d3 = this voice's params (byte 0 = TYPE),
 | d0 = voice<<7.

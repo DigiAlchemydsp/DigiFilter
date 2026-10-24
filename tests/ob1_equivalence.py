@@ -44,7 +44,7 @@ def build(folder, name, source, coldfire, define=None):
         elf = folder / (name + '.elf')
         subprocess.run(['m68k-elf-gcc', '-mcpu=54455', '-O2', '-ffreestanding',
                         '-fno-builtin', '-nostdlib', '-fomit-frame-pointer', '-Wall',
-                        '-I', str(ROOT), str(file)] + extra + ['-Wl,-Ttext=0x10000',
+                        '-I', str(ROOT), '-I', str(ROOT / 'shared'), str(file)] + extra + ['-Wl,-Ttext=0x10000',
                         '-Wl,-e,ob1_vcf_run', '-o', str(elf)], check=True)
         binary = folder / (name + '.bin')
         subprocess.run(['m68k-elf-objcopy', '-O', 'binary', str(elf), str(binary)], check=True)
@@ -54,7 +54,7 @@ def build(folder, name, source, coldfire, define=None):
         return ColdFire(binary.read_bytes(), symbols)
     lib = folder / (name + '.so')
     subprocess.run(['cc', '-O2', '-shared', '-fPIC', '-Wall', '-Wextra', '-I', str(ROOT),
-                    str(file)] + extra + ['-o', str(lib)], check=True)
+                    '-I', str(ROOT / 'shared'), str(file)] + extra + ['-o', str(lib)], check=True)
     return Native(lib)
 
 
@@ -126,7 +126,7 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory)
         old = build(folder, 'baseline', original, args.coldfire)
-        new = build(folder, 'candidate', (ROOT / 'ob1_vcf.c').read_text(), args.coldfire,
+        new = build(folder, 'candidate', (ROOT / 'shared' / 'ob1_vcf.c').read_text(), args.coldfire,
                     None if args.table else 'OB1_FBSAT_EXACT')
         rng = random.Random(314159)
         controls = [(fi, qi) for fi in [-256, 0, 1, 255, 256, 8193, 16384, 32511, 32512, 32768]

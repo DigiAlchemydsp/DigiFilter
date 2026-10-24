@@ -25,7 +25,8 @@ def build():
     d = tempfile.mkdtemp()
     elf, bin_ = os.path.join(d, 'ob1.elf'), os.path.join(d, 'ob1.bin')
     subprocess.check_call([CROSS + 'gcc', '-mcpu=54455', '-O2', '-ffreestanding', '-fno-builtin', '-nostdlib',
-                           '-fomit-frame-pointer', '-Wall', '-I', ROOT, os.path.join(ROOT, 'ob1_vcf.c'),
+                           '-fomit-frame-pointer', '-Wall', '-I', ROOT, '-I', os.path.join(ROOT, 'shared'),
+                           os.path.join(ROOT, 'shared', 'ob1_vcf.c'),
                            os.path.join(ROOT, 'tests', 'ob1_bench.c'), '-Wl,-Ttext=0x10000',
                            '-Wl,-e,ob1_bench', '-o', elf])
     subprocess.check_call([CROSS + 'objcopy', '-O', 'binary', elf, bin_])

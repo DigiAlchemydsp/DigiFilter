@@ -1,107 +1,47 @@
 # releases
 
-Prebuilt DigiFilter for the **Digitakt mk1, OS 1.53 and OS 1.54**.
+Prebuilt DigiFilter for the **Digitakt mk1 (OS 1.54)** and **Digitone mk1 /
+Keys (OS 1.44)**. Latest OS only; one elemod per machine.
 
 Published releases: [GitHub Releases](https://github.com/DigiAlchemydsp/DigiFilter/releases)
-(`v1.1b` is current / Latest).
+(`v1.2` is current / Latest).
 
 | file | |
 |---|---|
-| `elemods/digifilter-1.1b.elemod` | the mod, **OS 1.53** (current) |
-| `elemods/digifilter-1.1b-os1.54.elemod` | the mod, **OS 1.54** |
-| `DigiFilter-1.1b.zip` | the release package: both elemods + `sources/` + README (install/build) + LICENSE |
-| `elemods/digifilter-1.1a.elemod`, `elemods/digifilter-1.1a-os1.54.elemod`, `DigiFilter-1.1a.zip` | the previous release |
-| `elemods/digifilter-1.1.elemod`, `DigiFilter-1.1.zip` | the previous release (OS 1.53) |
-| `elemods/digifilter-1.0k.elemod`, `DigiFilter-1.0k.zip` | an earlier release |
-| `elemods/digifilter-1.0j.elemod`, `DigiFilter-1.0j.zip`, `elemods/digifilter-1.0i.elemod`, `DigiFilter-1.0i.zip`, `elemods/digifilter-1.0h.elemod`, `DigiFilter-1.0h.zip` | earlier releases |
+| `elemods/digifilter-1.2.elemod` | the Digitakt mk1 mod, **OS 1.54** |
+| `elemods/digifilter-dn-1.2.elemod` | the Digitone mk1/Keys mod, **OS 1.44** |
+| `DigiFilter-1.2.zip` | the release package: both elemods + `sources/` + README + LICENSE |
+| older elemods/zips | previous releases, kept for reference |
 
-Each `.elemod` needs `core` from
-[elekloader](https://github.com/irpina/elekloader) and the matching stock OS file
-(`Digitakt_OS1.53.syx` or `Digitakt_OS1.54.syx`). The zip's README has the full
-install and build-from-source instructions. See
-[../CHANGELOG.md](../CHANGELOG.md) for the full history.
+Each elemod needs its matching core and stock OS file:
 
-Install (OS 1.53; for 1.54 use the 1.54 stock, the `-os1.54` elemod and a 1.54
-`core`):
+| machine | elemod | core | stock |
+|---|---|---|---|
+| Digitakt mk1 | `digifilter-1.2.elemod` | `core-4.0-os1.54.elemod` | `Digitakt_OS1.54.syx` |
+| Digitone mk1/Keys | `digifilter-dn-1.2.elemod` | `core-dn1-4.0-os1.44.elemod` | `Digitone_OS1.44.syx` |
+
+Install (repeat with the other machine's files):
 
 ```sh
-python -m elekloader.patch --stock Digitakt_OS1.53.syx \
-    --mod core-2.1.elemod --mod releases/elemods/digifilter-1.1b.elemod \
-    --out Digitakt_OS1.53-digifilter.syx --version 2.0t
+python -m elekloader.patch --stock Digitakt_OS1.54.syx \
+    --mod core-4.0-os1.54.elemod \
+    --mod releases/elemods/digifilter-1.2.elemod \
+    --out Digitakt_OS1.54-digifilter.syx --version 1.2
 ```
 
 Then flash the `.syx` with Elektron Transfer.
 
-New in 1.1b (wins and deltas vs the stock per-voice filter, ~2400 instructions
-per voice per 32-frame block):
+New in 1.2: a unified layout - `shared/` DSP, `digifilter-dt/` and
+`digifilter-dn/` adapters. Both mods target only the latest OS and require core
+4.0. The Digitakt side is DigiFilter (BP/BP2/COMB/TRASH/OB4/OB2); the Digitone
+side is Filter+FX (VOWEL/BANK/FOLD/CRUSH/RING/PHASER/FLANGER), with TYPE 4..10
+and VOWEL/BANK AUX1/AUX2 on page 2. On the Digitakt, the FLTR TYPE box now
+clears the full 17x17 cell and uses bitmap icons. The DT audio path is the 1.1b
+DSP.
 
-| type | instructions | vs stock | MCF54418 cycles |
-|---|---|---|---|
-| BP / BP2 (knobs held) | 1072 | **-55 %** | ~1300 |
-| BP / BP2 (cutoff swept) | 1635 | **-32 %** | ~2250 |
-| COMB / TRASH | 1693 | **-29 %** | ~2020 |
-| OB4 (RESO 64) | 3213 | +34 % | 4867 |
-| OB2 (RESO 64) | 3181 | +33 % | 4948 |
-| OB4 / OB2 (zero feedback) | ~1390 | **-42 %** |n/a |
+See [../CHANGELOG.md](../CHANGELOG.md) for the full history and the device
+READMEs for controls, performance and validation.
 
-BP/BP2 and COMB/TRASH are now cheaper than the stock filter in every case. The
-SVF's only division is a precomputed table (no software divide), the comb's
-damping-off loop is specialized, and the OB ladder caches its coefficients and
-uses a 512-segment interpolated saturation table. Audio is bit-for-bit
-identical except the OB table, whose drift is bounded at ~-100 dBFS. Emulator
-verified; hardware testing is pending. See [../CHANGELOG.md](../CHANGELOG.md)
-and `../RE_NOTES.md` §15-16.
-
-New in 1.1a: a performance pass over the per-voice DSP — BP/BP2 recompute the
-state-variable filter's coefficients only when the cutoff/resonance move, so with
-static knobs they cost ~60 % fewer instructions (~1229 vs 3113 per voice per
-block, below the stock filter) and ~22 % fewer while modulated; the audio is
-bit-for-bit the same. The mod now also builds for **OS 1.54** from the same
-source tree. See [../CHANGELOG.md](../CHANGELOG.md) and
-[../HANDOFF-OPTIMIZATION.md](../HANDOFF-OPTIMIZATION.md).
-
-New in 1.1: two more types, **OB4 (12)** and **OB2 (13)**, the Oberheim OB-1's
-filter — its 4-pole lowpass ladder and its 2-pole output — self-oscillating at
-the top of RESO (from about 121), with the FLTR page drawing their response.
-Contributed by Simon Johansson (PR #2); how they were made and checked is in
-[docs/ob1.md](../docs/ob1.md). See [../CHANGELOG.md](../CHANGELOG.md).
-
-New in 1.0k: while TYPE is COMB or TRASH the **RESO / GAIN** knob is the comb
-feedback (0…127, up to 31/32 — near self-oscillation for a metallic ring), and
-the second FLTR page's free encoders add **C = Harmonics** and **G = Damping**
-(labelled HARM/DAMP, round dials like SRR) — **alongside** the stock
-**Base / Width / Env Delay / SRR** knobs, which keep working and saving. The new
-values are mirrored into saved kit words (best-effort persistence). Also fixed:
-**BP (TYPE 8)** output is now saturated, so it no longer distorts on hot
-material. See [../CHANGELOG.md](../CHANGELOG.md).
-
-New in 1.0j: the resonance range is capped for the new modes so they no longer
-clip or run away — BP/BP2 use a maximum Q of ~5, COMB/TRASH a feedback of 13/16
-(+14 dB at the teeth), and the drawn FREQ/RES curve uses the same cap, so it
-shows the resonance the audio actually gets. See
-[../CHANGELOG.md](../CHANGELOG.md).
-
-New in 1.0i: the FLTR page's FREQ/RES response curve **and the small TYPE-box
-glyph** are painted for the new modes from a core `ev_draw` handler (so they
-survive multi-mod builds, where patching the page drawView slot was overwritten
-by another mod's `ev_draw` subscription) — a narrower, smooth band-pass bell for
-BP/BP2 (no vertical brickwall at the edges) and evenly spaced comb teeth for
-COMB/TRASH whose spacing sweeps across the whole FREQ range and whose depth rises
-with RESO (no dead zones); the filter envelope modulates the new modes; the DSP
-is optimized (no more than the stock filter's cost per voice per block); the
-second FLTR page drives COMB/TRASH delay/harmonics/damping/feedback trim.
-
-The package contains the mod's own bytes only; no Elektron firmware. See
-[../LICENSE](../LICENSE). Rebuild with `elekloader.sdk.build` from the sources
-under `../` (see [../README.md](../README.md)).
-
-Stress-tested on hardware over 3 days: **PASS** (a Digitakt mk1). **1.1a** was
-tested on hardware (Digitakt mk1) on both **OS 1.53** and **OS 1.54**: PASS.
-**1.1b** is emulator-verified; hardware testing is pending.
-
-## Credits
-
-- **Digital Alchemy DSP** — the band-pass **BP / BP2**, **COMB**, **TRASH** modes
-  and the per-voice DSP / FLTR-page response curve.
-- **Simon Johansson** (PR #2) — the **OB4 / OB2** Oberheim OB-1 ladder modes
-  ([../docs/ob1.md](../docs/ob1.md)).
+The package contains the mods' own bytes only; no Elektron firmware. See
+[../LICENSE](../LICENSE). Rebuild with `tools/build_release.py` (see
+[../README.md](../README.md)).

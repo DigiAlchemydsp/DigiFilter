@@ -1,4 +1,4 @@
-/* Digi Filter: extra per-track filter modes for the Digitakt mk1 (OS 1.53).
+/* Digi Filter: extra per-track filter modes for the Digitakt mk1 (OS 1.54).
  *
  * The stock filter keeps running for every stock TYPE value: nothing here
  * reimplements a stock mode, so stock sounds are untouched. TYPE values above
@@ -16,27 +16,23 @@
  * level at 0x4199df58 + v*12, and the modulated cutoff is
  *   (FREQ<<16) + (((-env) * ((ENVword-0x4000)<<17)) >> 31).
  *
- * DSP lives in df_dsp.c (shared, firmware-free, 1.1a verbatim): this file is
- * the Digitakt adapter (kit slots, envelope, dispatch). Behavior identical.
+ * DSP lives in ../shared/df_dsp.c (firmware-free, shared with the Digitone
+ * port): this file is the Digitakt adapter (kit slots, envelope, dispatch).
  *
- * The FLTR page's FREQ/RES response *curve* is drawn by filter_ui.c, from a
- * core ev_draw handler (digifilter_draw) for TYPE 8..11. See RE_NOTES.md.
+ * The FLTR page's FREQ/RES response *curve* and TYPE-box icon are drawn by
+ * filter_ui.c, from a core ev_draw handler (digifilter_draw) for TYPE 8..13.
+ * See RE_NOTES.md.
  */
 
-/* ---- firmware addresses that moved in OS 1.54 (tools/port_os.py, tools/os154.json) ---- */
-#ifdef OS154
+/* ---- firmware addresses (OS 1.54) ---- */
 #define F_4199dc44 0x4199ec44
 #define F_4199df58 0x4199ef58
-#else
-#define F_4199dc44 0x4199dc44
-#define F_4199df58 0x4199df58
-#endif
-/* ---- end of the moved addresses ---- */
+/* ---- end of the firmware addresses ---- */
 
-#include "df_dsp.h"
-#include "ob1_vcf.h"
+#include "../shared/df_dsp.h"
+#include "../shared/ob1_vcf.h"
 
-/* ---- firmware (OS 1.53) ---- */
+/* ---- firmware (OS 1.54) ---- */
 #define UI_KIT (*(unsigned char *volatile *)F_4199dc44)  /* the kit of the pattern being edited */
 
 /* a track's sound block in the kit: 0xa2 bytes at kit + 0x20 + t*0xa2, the 53
@@ -44,7 +40,7 @@
 #define SOUND(kit, t)   ((kit) + 0x20 + (t) * 0xa2)
 #define FSLOT(kit, t, s) ((int)(*(unsigned short *)(SOUND(kit, t) + 0x14 + 2 * (s))))
 
-/* Confirmed from the filter parameter descriptors at 0x401aa3b4.. (OS 1.53):
+/* Confirmed from the filter parameter descriptors at 0x401aa3b4.. (OS 1.54):
  *   Frequency  slot 0x1a  long "Frequency"  short "FREQ"  CC 74
  *   Resonance  slot 0x1b  long "Resonance"  short "RESO"  CC 75
  *   FilterType slot 0x19  long "Filter Type" short "TYPE" CC 76  (display max 7)
@@ -266,7 +262,7 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
                 prev_filt_type[voice] = type;
             }
             ob1_vcf_run(ob ? OB1_TAP2 : OB1_TAP4, cutoff_index8(params, voice),
-                        df_clampi((int)(unsigned)SET_RESO(voice) >> 8, 0, 127), buf, voice);
+                        ob1_reso_depth((int)(unsigned)SET_RESO(voice) >> 8), buf, voice);
             return 1;
         }
         if (m >= 0 && m < FM_NMODES) {
@@ -275,7 +271,9 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
              * same fields the stock per-voice filter reads, so the FLTR knobs
              * and the filter envelope track. */
             int fi = cutoff_index(params, voice);
-            int qi = df_clampi((unsigned)SET_RESO(voice) >> 11, 0, 15);
+            int qi = (unsigned)SET_RESO(voice) >> 11;
+            if (qi > 15)
+                qi = 15;
             if (prev_filt_type[voice] != type) {
                 df_reset(voice);
                 prev_filt_type[voice] = type;
@@ -288,8 +286,15 @@ int digifilter_filt(unsigned char *params, int *buf, int active, int voice)
                 int fb = (int)(unsigned)SET_RESO(voice) >> 8;
                 int harm = (int)(unsigned)PARAM_SLOT(params, FS_HARM) >> 8;
                 int damp = (int)(unsigned)PARAM_SLOT(params, FS_DAMP);
-                int hdiv = 1 + harm * 3 / 127;
-                int div = (m == FM_COMB) ? 1 : 2;
+                int hdiv, div;
+                if (fb > 127)
+                    fb = 127;
+                if (harm > 127)
+                    harm = 127;
+                if (damp > 0x7f00)
+                    damp = 0x7f00;
+                hdiv = 1 + harm * 3 / 127;
+                div = (m == FM_COMB) ? 1 : 2;
                 df_comb_run(buf, 32, fi, fb, voice, div, hdiv, damp);
             }
             return 1;

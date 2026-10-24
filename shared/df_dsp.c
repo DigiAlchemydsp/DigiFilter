@@ -32,6 +32,12 @@ static struct df_coef svf_c[8];
 #define COMB_DSHIFT 6
 #define COMB_GSHIFT 7
 
+/* floor(2^16 / d) for d = 1..8; ceil() is exact for COMB_DELAY <= 255, so the
+ * comb's delay divisor needs no software division. */
+static const uint32 COMB_RECIP[9] = {
+    0, 65536, 32768, 21846, 16384, 13108, 10923, 9363, 8192
+};
+
 /* floor(a * b / 2^sh) for 16 <= sh <= 31, when the result fits 32 bits. */
 int32 df_mulsh(int32 a, int32 b, int sh)
 {
@@ -137,7 +143,7 @@ static inline __attribute__((always_inline)) void df_comb_nodamp(int32 *buf, int
 void df_comb_run(int32 *buf, int frames, int fi, int fb, int v, int div,
                  int hdiv, int damp)
 {
-    int32 target = COMB_DELAY[fi] / (div * hdiv);
+    int32 target = (int32)(((uint32)COMB_DELAY[fi] * COMB_RECIP[div * hdiv]) >> 16);
     int32 tdq, gt, *b = comb_buf[v];
     int p, i;
     if (target < 3)

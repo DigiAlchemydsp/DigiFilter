@@ -19,28 +19,20 @@
  * reads as the same UI.
  */
 
-/* ---- firmware addresses that moved in OS 1.54 (tools/port_os.py, tools/os154.json) ---- */
-#ifdef OS154
+/* ---- firmware addresses (OS 1.54) ---- */
 #define F_400c19a6 0x400c1bce
 #define F_401a9d9c 0x401aa09c
 #define F_4197b6b4 0x4197c6b4
 #define F_4197cf88 0x4197df88
 #define F_4199dc44 0x4199ec44
-#else
-#define F_400c19a6 0x400c19a6
-#define F_401a9d9c 0x401a9d9c
-#define F_4197b6b4 0x4197b6b4
-#define F_4197cf88 0x4197cf88
-#define F_4199dc44 0x4199dc44
-#endif
-/* ---- end of the moved addresses ---- */
+/* ---- end of the firmware addresses ---- */
 
 typedef int int32;
 typedef unsigned int uint32;
 
-#include "filter_tables.h"
+#include "../shared/filter_tables.h"
 
-/* the firmware's drawing primitives (OS 1.53) */
+/* the firmware's drawing primitives (OS 1.54) */
 typedef void (*fillrect_t)(void *bmp, int x0, int y0, int x1, int y1, int colour);
 #define FILLRECT ((fillrect_t)F_400c19a6)    /* colour 0 clear, 1 set, -1 invert */
 /* The page kind: the view's kind vector is at +124, its end at +128 and the
@@ -109,7 +101,8 @@ enum { FM_BP, FM_BP2, FM_COMB, FM_TRASH, FM_NMODES };
 /* the OB-1 modes (filter.c, docs/ob1.md): TYPE 12, 13; here modes FM_NMODES and FM_NMODES + 1 */
 #define FM_OB4 FM_NMODES
 #define FM_OB2 (FM_NMODES + 1)
-#include "ob1_tables.h"
+#include "../shared/ob1_vcf.h"
+#include "../shared/ob1_tables.h"
 
 /* Graph box: the FLTR page's FREQ/RES response area (screen 128 x 64, firmware
  * bitmap row 0 = the bottom). Measured off the stock page: the box is x 20..71,
@@ -120,11 +113,12 @@ enum { FM_BP, FM_BP2, FM_COMB, FM_TRASH, FM_NMODES };
 #define GY1 23
 
 /* The small filter-type box to the right of the response graph (same rows as
- * the graph box); the stock page draws an "EQ n" glyph and name inside it. */
-#define TBX0 78
-#define TBX1 92
-#define TBY0 8
-#define TBY1 22
+ * the graph box). The 17x17 cell includes the stock border; the stock page
+ * draws an "EQ n" glyph and name inside it. */
+#define TBX0 77
+#define TBX1 93
+#define TBY0 7
+#define TBY1 23
 
 static int32 curve[128];                 /* raw response per frequency step */
 static int curve_lowpass;                /* OB4/OB2: no taper on the left, a lowpass runs flat to the edge */
@@ -377,43 +371,53 @@ static int curve_y(int s, int v)
     return GY0 + 2 + v * w / 8;
 }
 
-/* The small type-box glyph: mask the stock "EQ n" artwork and draw a fixed mini
- * version of the mode -- a bell for BP, a wider bell for BP2, comb teeth for
- * COMB, and a small trash can for TRASH. Fits the stock box interior. */
+/* TYPE-box icons: 17x17 bitmaps (row 0 = bottom, bit x = column TBX0+x).
+ * Ported from the Digitone adapter. Each icon includes the cell border, so
+ * clearing the full cell removes the stock "EQ n" artwork cleanly. */
+static const unsigned BP_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x10FE1, 0x10FE1, 0x10FE1, 0x10FE1, 0x10FE1, 0x107C1, 0x107C1, 0x107C1, 0x107C1, 0x10381, 0x10381, 0x10381, 0x10101, 0x0FFFE,
+};
+static const unsigned BP2_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x13FF9, 0x13FF9, 0x13FF9, 0x11FF1, 0x11FF1, 0x10FE1, 0x10FE1, 0x107C1, 0x10381, 0x10101, 0x0FFFE,
+};
+static const unsigned COMB_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x14925, 0x0FFFE,
+};
+static const unsigned TRASH_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x13FF9, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12449, 0x12009, 0x17FFD, 0x10381, 0x10001, 0x10001, 0x0FFFE,
+};
+static const unsigned OB4_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x10FFD, 0x10FFD, 0x10FFD, 0x107FD, 0x107FD, 0x107FD, 0x103FD, 0x103FD, 0x103FD, 0x10381, 0x10381, 0x10381, 0x10381, 0x10381, 0x0FFFE,
+};
+static const unsigned OB2_GLYPH[17] = {
+    0x0FFFE, 0x10001, 0x17FFD, 0x17FFD, 0x17FFD, 0x17FFD, 0x13FFD, 0x11FFD, 0x10FFD, 0x107FD, 0x103FD, 0x10381, 0x10381, 0x10381, 0x10381, 0x10381, 0x0FFFE,
+};
+
 static void type_glyph(void *bmp, int mode)
 {
-    int x, cx = (TBX0 + TBX1) / 2, h = TBY1 - (TBY0 + 1);
+    const unsigned *g;
+    int r;
+    if (mode == FM_BP) g = BP_GLYPH;
+    else if (mode == FM_BP2) g = BP2_GLYPH;
+    else if (mode == FM_COMB) g = COMB_GLYPH;
+    else if (mode == FM_TRASH) g = TRASH_GLYPH;
+    else if (mode == FM_OB4) g = OB4_GLYPH;
+    else g = OB2_GLYPH;
     FILLRECT(bmp, TBX0, TBY0, TBX1, TBY1, 0);
-    if (mode == FM_TRASH) {
-        int b0 = TBX0 + 2, b1 = TBX1 - 2, bb = TBY0 + 1;
-        FILLRECT(bmp, b0, bb, b1, bb, 1);                    /* base */
-        FILLRECT(bmp, b0, bb, b0, TBY1 - 3, 1);              /* left wall */
-        FILLRECT(bmp, b1, bb, b1, TBY1 - 3, 1);              /* right wall */
-        FILLRECT(bmp, b0 - 1, TBY1 - 3, b1 + 1, TBY1 - 3, 1);/* rim */
-        FILLRECT(bmp, cx - 1, TBY1 - 2, cx + 1, TBY1 - 2, 1);/* lid handle */
-        FILLRECT(bmp, cx - 2, bb + 1, cx - 2, TBY1 - 5, 1);  /* ribs */
-        FILLRECT(bmp, cx + 2, bb + 1, cx + 2, TBY1 - 5, 1);
-        return;
-    }
-    if (mode >= FM_OB4) {                                   /* a lowpass with a resonant bump */
-        int knee = cx + 1, fall = (mode == FM_OB4) ? 3 : 1;
-        for (x = TBX0 + 1; x < TBX1; x++) {
-            int v = x < knee - 2 ? h * 2 / 3 : x <= knee ? h : h * 2 / 3 - (x - knee) * fall * h / 12;
-            if (v > 0)
-                FILLRECT(bmp, x, TBY0 + 1, x, TBY0 + 1 + v, 1);
+    for (r = 0; r < 17; r++) {
+        unsigned rowbits = g[r];
+        int x = 0;
+        while (x < 17) {
+            int start;
+            if (!(rowbits & (1u << x))) {
+                x++;
+                continue;
+            }
+            start = x;
+            while (x < 17 && (rowbits & (1u << x)))
+                x++;
+            FILLRECT(bmp, TBX0 + start, TBY0 + r, TBX0 + x - 1, TBY0 + r, 1);
         }
-        return;
-    }
-    for (x = TBX0 + 1; x < TBX1; x++) {
-        int v;
-        if (mode == FM_COMB) {
-            v = ((x - TBX0) % 3 == 1) ? h : h / 3;           /* comb teeth */
-        } else {
-            int half = (mode == FM_BP2) ? 7 : 4, dx = x - cx;
-            v = (dx * dx >= half * half) ? 0
-              : h * (half * half - dx * dx) / (half * half); /* bell */
-        }
-        FILLRECT(bmp, x, TBY0 + 1, x, TBY0 + 1 + v, 1);
     }
 }
 
@@ -437,6 +441,8 @@ static int read_track(int *type, int *fi, int *qi)
         *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 8, 0, 127);
     else
         *qi = clampi((unsigned)FSLOT(kit, t, FS_RESO) >> 11, 0, 15) * 13 / 15;
+    if (*type >= FM_OB4)                  /* the OB ladder uses 75% of the RESO travel */
+        *qi = ob1_reso_depth(*qi);
     return 1;
 }
 
@@ -607,6 +613,7 @@ static void draw_dial(void *bmp, int cx, int cy, int v)
  * (bmp, ctrl): ctrl is the view controller drawAll walks. */
 void digifilter_draw(void *bmp, void *ctrl)
 {
+    static int curve_mode = -1, curve_fi = -1, curve_qi = -1;
     int kind = -1, mode, fi, qi, x;
     if (!bmp || !page_view(ctrl, &kind))
         return;
@@ -625,7 +632,12 @@ void digifilter_draw(void *bmp, void *ctrl)
     /* Page 1: the stock page drew its response for this (to it, unknown) TYPE,
      * so clear the graph interior before painting ours. */
     FILLRECT(bmp, GX0 + 1, GY0 + 1, GX1 - 1, GY1 - 1, 0);
-    build_curve(mode, fi, qi);
+    if (mode != curve_mode || fi != curve_fi || qi != curve_qi) {
+        build_curve(mode, fi, qi);
+        curve_mode = mode;
+        curve_fi = fi;
+        curve_qi = qi;
+    }
     {
         int prev = -1;
         for (x = GX0 + 1; x < GX1; x++) {

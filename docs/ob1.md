@@ -37,6 +37,12 @@ This upper branch is an empirical calibration, not an inferred reference impleme
 1 kHz its relative oscillation levels at RESO 83, 87 and 95 agree within 0.4 dB after level matching.
 The response display uses the same calibration on its logarithmic frequency axis.
 
+**DigiFilter 1.2 maps the OB RESO knob to 75% of this 0..127 travel** (knob 127
+becomes kernel qi 95), on both the Digitakt and Digitone adapters, and the
+drawn OB curve uses the same scaled value. The model and kernel checks below
+still describe the full 0..127 calibration; the cap only changes how the mod
+feeds the knob into it, reducing the ladder's saturation at the top.
+
 The measured cutoff attenuation is reproduced at 250 Hz, 1 kHz and 4 kHz: approximately 12 dB for OB4
 and 6 dB for OB2, relative to their zero-resonance passbands. Exact resonant pitch and motion remain
 different. In the measured 0.49-to-0.51 full-resonance jump, this filter moves from about 2,480 to
@@ -57,7 +63,7 @@ filter types are unchanged. This calibration is against a software reference, no
 2. **The model** (`tests/ob1_model.py`): a zero-delay-feedback ladder of trapezoidal one-poles with U28's
    tanh in the feedback and each stage's OTA tanh. Its linear response is exactly the analog prototype's
    bilinear transform; its distortion matches SPICE's within 1.3 dB without resonance and 0.5 dB at k 3.3.
-3. **The kernel** (`ob1_vcf.c`): Q31 fixed point with ColdFire EMAC multiplies, U28's saturation as tanh's
+3. **The kernel** (`shared/ob1_vcf.c`): Q31 fixed point with ColdFire EMAC multiplies, U28's saturation as tanh's
    series to the fifth power, the coefficients ramped across each block, and a -102 dB seed near
    self-oscillation so it starts from silence. Checked against the model on the host (`tests/ob1_check.py`,
    `tests/ob1_artefacts.py`).
@@ -125,9 +131,9 @@ display have not been regenerated for the current control laws.
 
 | file | what |
 |---|---|
-| `ob1_vcf.c`, `ob1_vcf.h` | the kernel |
-| `ob1_tables.h` | the ladder's G per FREQ index, logarithmic graph positions and response curves; generated |
-| `tests/ob1_model.py` | the floating-point reference and its self-test; `--table` writes `ob1_tables.h` |
+| `shared/ob1_vcf.c`, `shared/ob1_vcf.h` | the kernel |
+| `shared/ob1_tables.h` | the ladder's G per FREQ index, logarithmic graph positions and response curves; generated |
+| `tests/ob1_model.py` | the floating-point reference and its self-test; `--table` writes `shared/ob1_tables.h` |
 | `tests/ob1_check.py` | the kernel (host build) against the model |
 | `tests/ob1_artefacts.py` | the kernel's digital artefacts: silence, stability, aliasing |
 | `tests/ob1_calibration.py` | actual native cutoff, bass loss, oscillation onset and relative oscillation levels |
@@ -142,7 +148,7 @@ From the repository's root:
 
 ```sh
 mise exec python@3.12.13 -- python tests/ob1_model.py
-mise exec python@3.12.13 -- python tests/ob1_model.py --table > ob1_tables.h
+mise exec python@3.12.13 -- python tests/ob1_model.py --table > shared/ob1_tables.h
 mise exec python@3.12.13 -- python tests/ob1_check.py  # needs cc
 mise exec python@3.12.13 -- python tests/ob1_artefacts.py
 mise exec python@3.12.13 -- uv run --with numpy python tests/ob1_calibration.py

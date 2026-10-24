@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = '00b2d0f'
 ARGS = 0x80001502
 ENV = 0x4199df58
+ENV154 = 0x4199ef58
 STACK, RET = 0x200000, 0x1f0000
 
 SNAPSHOT = '''
@@ -42,7 +43,7 @@ int test_run(int voice) {
 
 def build(folder, name, source, dsp, ob1, extra=''):
     c = folder / (name + '.c')
-    c.write_text(source + extra + SNAPSHOT)
+    c.write_text(source.replace('../shared/', 'shared/') + extra + SNAPSHOT)
     asm = folder / (name + '.s')
     asm.write_text(dsp)
     ob = folder / (name + '_ob1.c')
@@ -51,7 +52,7 @@ def build(folder, name, source, dsp, ob1, extra=''):
     subprocess.run(['m68k-elf-gcc', '-mcpu=54455', '-O2', '-ffreestanding',
                     '-fno-builtin', '-nostdlib', '-fomit-frame-pointer', '-Wall',
                     '-ffunction-sections', '-fdata-sections',
-                    '-I', str(ROOT), str(c), str(ob), str(asm),
+                    '-I', str(ROOT), '-I', str(ROOT / 'shared'), str(c), str(ob), str(asm),
                     '-Wl,-Ttext=0x10000', '-Wl,-e,test_run', '-Wl,--gc-sections',
                     '-Wl,-u,test_snapshot', '-o', str(elf)],
                    check=True)
@@ -92,6 +93,7 @@ class ColdFire:
         self.uc.mem_write(self.symbols['test_params'], bytes(params))
         self.uc.mem_write(ARGS + 0x36 + 106 * voice, struct.pack('>H', fb << 8))
         self.uc.mem_write(ENV + 12 * voice, struct.pack('>i', env))
+        self.uc.mem_write(ENV154 + 12 * voice, struct.pack('>i', env))
         self.uc.mem_write(self.symbols['test_buf'], b'\0' * 128)
         self.call('test_run', [voice])
         return list(struct.unpack('>32i', self.uc.mem_read(self.symbols['test_buf'], 128)))
@@ -111,8 +113,9 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory)
         old = build(folder, 'baseline', old_src, old_dsp, old_ob1)
-        new = build(folder, 'candidate', (ROOT / 'filter.c').read_text(),
-                    (ROOT / 'filter_dsp.s').read_text(), (ROOT / 'ob1_vcf.c').read_text(),
+        new = build(folder, 'candidate', (ROOT / 'digifilter-dt' / 'filter.c').read_text(),
+                    (ROOT / 'shared' / 'filter_dsp.s').read_text(),
+                    (ROOT / 'shared' / 'ob1_vcf.c').read_text(),
                     extra='\n#include "df_dsp.c"\n')
         blocks = 0
         for voice in range(8):

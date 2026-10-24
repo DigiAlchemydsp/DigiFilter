@@ -44,10 +44,11 @@ CFLAGS = ['-mcpu=54455', '-O2', '-ffreestanding', '-fno-builtin', '-nostdlib',
 def build():
     d = tempfile.mkdtemp()
     elf = os.path.join(d, 'df.elf')
-    subprocess.check_call([CROSS + 'gcc'] + CFLAGS + ['-I', ROOT,
-                           os.path.join(ROOT, 'df_dsp.c'),
-                           os.path.join(ROOT, 'filter.c'), os.path.join(ROOT, 'ob1_vcf.c'),
-                           os.path.join(ROOT, 'filter_dsp.s'),
+    subprocess.check_call([CROSS + 'gcc'] + CFLAGS + ['-I', ROOT, '-I', os.path.join(ROOT, 'shared'),
+                           os.path.join(ROOT, 'shared', 'df_dsp.c'),
+                           os.path.join(ROOT, 'digifilter-dt', 'filter.c'),
+                           os.path.join(ROOT, 'shared', 'ob1_vcf.c'),
+                           os.path.join(ROOT, 'shared', 'filter_dsp.s'),
                            os.path.join(ROOT, 'tests', 'df_bench.c'),
                            '-Wl,-Ttext=0x10000', '-Wl,-e,df_filt_run',
                            '-Wl,--gc-sections', '-o', elf])

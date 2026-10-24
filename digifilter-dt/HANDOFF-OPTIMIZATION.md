@@ -1,5 +1,8 @@
 # DigiFilter — optimization handoff (1.1a)
 
+> **Historical (1.1a) note.** The current mod targets OS 1.54 only; see
+> [README.md](README.md). The 1.53 instructions below are kept for history.
+
 A performance pass over the per-voice DSP. **The extra modes' audio is
 bit-for-bit identical to 1.1** — only the machine cost changed. This is the
 companion to `HANDOFF.md` (session 3, the 1.0k feature work) and the ledger is

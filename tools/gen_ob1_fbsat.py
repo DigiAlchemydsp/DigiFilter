@@ -49,7 +49,7 @@ def main():
     args = parser.parse_args()
     values = [correction(min(i << SHIFT, 32767)) for i in range(N + 1)]
     assert all(0 <= v < (1 << 31) for v in values)
-    dest = os.path.join(ROOT, 'ob1_fbsat_table.h')
+    dest = os.path.join(ROOT, 'shared', 'ob1_fbsat_table.h')
     text = render(values)
     if args.check:
         with open(dest, newline='') as f:

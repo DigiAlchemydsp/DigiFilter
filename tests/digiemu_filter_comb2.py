@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import filter_model as FM  # noqa: E402
 
-txt = open(os.path.join(os.path.dirname(HERE), "filter_tables.h")).read()
+    txt = open(os.path.join(os.path.dirname(HERE), "shared", "filter_tables.h")).read()
 COMB_D = [int(x) for x in re.findall(r"\d+", txt.split("COMB_DELAY[128]")[1].split("};")[0])]
 
 FW = os.path.join(a.digiemu, "portable", "firmware", a.fw)

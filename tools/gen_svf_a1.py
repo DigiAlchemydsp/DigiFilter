@@ -3,9 +3,9 @@
 every (FREQ index fi, resonance index qk) the SVF can select, so mode_coef needs
 no software division at all.
 
-Builds tools/gen_svf_a1.c (which includes the module's real filter.c, so the
-values are bit-for-bit what div55 would have produced) for the ColdFire with the
-SDK flags, runs gen() in Unicorn, and formats the filled a1table into the header.
+Builds tools/gen_svf_a1.c (which includes the shared df_dsp.c, so the values are
+bit-for-bit what df_div55 would have produced) for the ColdFire with the SDK
+flags, runs gen() in Unicorn, and formats the filled a1table into the header.
 Needs a Unicorn that executes the ColdFire EMAC (mac.l): digiemu's patched build.
 
     # from a digiemu checkout, with m68k-elf-gcc on PATH:
@@ -25,7 +25,8 @@ BASE, STACK, RET = 0x10000, 0x200000, 0x1f0000
 NROW, NCOL = 14, 128
 CFLAGS = ['-mcpu=54455', '-O2', '-ffreestanding', '-fno-builtin', '-nostdlib',
           '-fno-pic', '-fno-pie', '-fomit-frame-pointer', '-Wall',
-          '-ffunction-sections', '-fdata-sections', '-I', ROOT]
+          '-ffunction-sections', '-fdata-sections', '-I', ROOT,
+          '-I', os.path.join(ROOT, 'shared')]
 
 
 def build():
@@ -76,7 +77,7 @@ def render(table):
 
 def main():
     table = run()
-    dest = os.path.join(ROOT, 'svf_a1_tables.h')
+    dest = os.path.join(ROOT, 'shared', 'svf_a1_tables.h')
     with open(dest, 'w', newline='\n') as f:
         f.write(render(table))
     print('wrote %s (%d rows x %d)' % (dest, NROW, NCOL))

@@ -1,6 +1,9 @@
 # Reverse-engineering notes (per-track `digifilter`)
 
-**Device: Digitakt mk1, OS 1.53 only.** Image = stock main OS at `0x40000400`,
+> **Version 1.2 targets Digitakt mk1 OS 1.54 only.** The sections below are the
+> original 1.53 RE notes, kept for history; §14 lists the moved 1.54 addresses.
+
+**Device: Digitakt mk1, OS 1.53 (historical).** Image = stock main OS at `0x40000400`,
 len 2475584, sha256 `4b47a950…c5df` (`.syx` sha256 `9bdd44bb…`).
 
 Marks: **[S]** static (image bytes), **[L]** verified live in digiemu.
@@ -461,11 +464,10 @@ the one-per-moving-block frequency.
 
 ## 14. OS 1.54 [S]
 
-The mod also builds for **Digitakt mk1 OS 1.54** (main sha256 `5c58bf9e…`,
+The mod targets **Digitakt mk1 OS 1.54** (main sha256 `5c58bf9e…`,
 `.syx` sha256 `f78ba80f…`, main_len 2479680). 1.54 moved the main OS by a few
-hundred bytes, so the addresses the mod names moved with it; the porter
-(`tools/port_os.py` from the Tone+FX Digitakt port) mapped them and rewrote the
-sources as per-OS macros (`mod.json` `"ports": {"1.54": …}`).
+hundred bytes, so the addresses the mod names moved with it. The 1.53 column
+below is the pre-1.2 history; version 1.2 uses the 1.54 addresses directly.
 
 | what | 1.53 | 1.54 |
 |---|---|---|

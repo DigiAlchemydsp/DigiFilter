@@ -1,8 +1,68 @@
 # Changelog
 
 All notable changes to DigiFilter. Format-2
-[elekloader](https://github.com/irpina/elekloader) mod for the Elektron
-Digitakt **mk1, OS 1.53**. Versioned as `<major>.<minor><letter>`.
+[elekloader](https://github.com/irpina/elekloader) mods for the Elektron
+**Digitakt mk1 (OS 1.54)** and **Digitone mk1/Keys (OS 1.44)**. Versioned as
+`<major>.<minor><letter>`.
+
+## [1.2] - 2026-10-22
+
+Unified latest-OS release: one elemod per machine, built from one shared DSP
+core.
+
+### Added
+
+- **Digitone mk1/Keys Filter+FX port**: VOWEL/BANK/FOLD/CRUSH/RING/PHASER/
+  FLANGER as TYPE 4..10, per-voice FREQ/RESO, AUX1/AUX2 on page-2 C/G for
+  VOWEL/BANK, TYPE names, response/transfer graphs and TYPE icons.
+- `shared/`: the firmware-free DSP cores (`df_dsp.c/h`, `filter_dsp.s`,
+  `ob1_vcf.c/h` for DT; `fx_dsp.c`, `biquad_dsp.s` and their tables for DN).
+- `tools/build_release.py`: builds, lints, patch-checks and packages both
+  elemods.
+
+### Performance
+
+- **DT comb core:** the comb's delay divisor (1..8) now uses a small reciprocal
+  table instead of a software division. With digiemu's cycle model, COMB/TRASH
+  drops from ~2090 to ~2046 cycles static and ~2075 to ~2025 swept per voice
+  per block.
+- **DN per-voice adapter:** reads its `fw_voice_params` block once per block
+  (`TYPE`/`RESO`/`AUX1`/`AUX2`) instead of recomputing the voice base for every
+  slot, and uses one-compare bounds checks instead of the generic clamps.
+- **DN UI:** finds both FLTR pages in one view-list walk and caches the
+  response/transfer curve until mode/FREQ/RESO changes.
+- **DT:** curve caching and run-length icon drawing. BP/BP2 also drop about 1%
+  of their cycles from the bounds-check change.
+
+### Changed
+
+- Repository split into `digifilter-dt/`, `digifilter-dn/` and `shared/`.
+- **Latest OS only:** Digitakt 1.54 (1.53 removed) and Digitone 1.44 (1.43
+  removed). The `ports` blocks and per-OS conditionals are gone.
+- Both mods now require **core 4.0** (`core-4.0-os1.54` /
+  `core-dn1-4.0-os1.44`).
+- The Digitakt FLTR TYPE box now clears the full 17x17 cell (77..93 / 7..23)
+  and draws the Digitone's bitmap icons, masking the stock `EQ n` artwork
+  cleanly.
+- **OB4/OB2 resonance (Digitakt)** is scaled to **75% of the 0..127 travel**,
+  to keep the ladder out of heavy saturation at the top of the knob. The drawn
+  OB curve uses the same scaled depth. Self-oscillation moves from about RESO 81
+  to about knob 108.
+- **DN TYPE persistence:** the stock temp save (FUNC+YES) resets the sound TYPE
+  field above 3 on reload. TYPE 4..10 is now mirrored into the low byte of BASE
+  (a stock savable 8.8 param) and restored on the next UI tick. Stock TYPE 0..3
+  still persist natively; AUX1/AUX2 remain best-effort.
+
+### Docs
+
+- DN: document the Filter+FX modes, the VOWEL/BANK AUX1/AUX2 controls, the
+  TYPE mirror that makes FUNC+YES/FUNC+NO persist TYPE 4..10, and the
+  PTN/GLOBAL project paths for AUX1/AUX2.
+
+### Releases
+
+- `DigiFilter-1.2.zip` carries `elemods/digifilter-1.2.elemod` (Digitakt 1.54)
+  and `elemods/digifilter-dn-1.2.elemod` (Digitone 1.44).
 
 ## [1.1b] - 2026-10-18
 

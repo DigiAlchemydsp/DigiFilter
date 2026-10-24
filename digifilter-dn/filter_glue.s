@@ -1,6 +1,6 @@
-| DigiFilter-DN: raw site entry points (Digitone mk1, OS 1.43/1.44).
-| Firmware addresses are per-OS via defsym FILTER/FMT (mod.json).
-| Uses core-dn1 exports fw_voice_params/fw_voices (core 3.1) for TYPE.
+| DigiFilter-DN: raw site entry points (Digitone mk1, OS 1.44).
+| Firmware addresses come from defsym FILTER/FMT (mod.json).
+| Uses core-dn1 exports fw_voice_params/fw_voices (core 4.0) for TYPE.
 
         .section .run, "ax"
         .include "digitone-mk1/core3.inc"
@@ -10,7 +10,7 @@
 | Stock formatter (FMT, 0x40014b6c both versions) is called as
 |   f(value<<8, char *dst) -- value at 4(%sp), dst at 8(%sp)
 | and prints OFF/LP2/HP/LP4 for 0..3 (clamped). We return our names for
-| 4..7 and tail-jump to stock otherwise.
+| 4..10 and tail-jump to stock otherwise.
         .balign 2
         .globl  digifilter_dn_typefmt
 digifilter_dn_typefmt:
@@ -18,7 +18,7 @@ digifilter_dn_typefmt:
         asr.l   #8, %d0
         cmpi.l  #4, %d0
         blt.s   .Lstock_dn
-        cmpi.l  #10, %d0
+        cmpi.l  #11, %d0
         bge.s   .Lstock_dn
         subq.l  #4, %d0
         lsl.l   #3, %d0                 | 8-byte strides
@@ -37,23 +37,25 @@ digifilter_dn_typefmt:
         .balign 8
         .globl  digifilter_dn_names
 digifilter_dn_names:
-        .asciz  "BP"
+        .asciz  "VOWEL"
         .balign 8
-        .asciz  "BP2"
+        .asciz  "BANK"
         .balign 8
-        .asciz  "COMB"
+        .asciz  "FOLD"
         .balign 8
-        .asciz  "TRASH"
+        .asciz  "CRUSH"
         .balign 8
-        .asciz  "OB4"
+        .asciz  "RING"
         .balign 8
-        .asciz  "OB2"
+        .asciz  "PHASER"
+        .balign 8
+        .asciz  "FLANGER"
         .balign 8
 
 | Value-text table with our modes appended (stock OFF/LP2/HP/LP4 via
-| OFF_STR/LP2_STR/HP_STR/LP4_STR defsym per OS, ours via names above).
+| OFF_STR/LP2_STR/HP_STR/LP4_STR defsym, ours via names above).
 | The value-text delegate (max sites + table site in mod.json) uses this
-| instead of the stock 4-entry table, so G shows BP/BP2/COMB/TRASH for 4..7.
+| instead of the stock 4-entry table, so G shows VOWEL/BANK/FOLD/CRUSH/RING/PHASER/FLANGER for 4..10.
         .balign 4
         .globl  digifilter_dn_types
 digifilter_dn_types:
@@ -67,13 +69,14 @@ digifilter_dn_types:
         .long   digifilter_dn_names+24
         .long   digifilter_dn_names+32
         .long   digifilter_dn_names+40
+        .long   digifilter_dn_names+48
 
 | ---------------- per-voice filter dispatcher ------------------------
 | mod.json hooks the buffer computation inside the voices' filter loop:
-|   1.43 0x4009e0b2 / 1.44 0x4009e0d2: addil #0x80004110,%d0 (6 bytes)
+|   1.44 0x4009e0d2: addil #0x80004110,%d0 (6 bytes)
 | (buffer = fw_voices + voice*128; d0 before = voice*128, voice 0..7).
 | We do that work, read the voice's TYPE from fw_voice_params (slot 54),
-| point a5 at our filter for 4..9 and at FILTER (stock) otherwise, and
+| point a5 at our filter for 4..10 and at FILTER (stock) otherwise, and
 | stash voice/buffer/cutoff for our C filter (which ignores the stock stack).
 | On entry d0 = voice*128, d2 = voice (pre-inc), a3 = this voice's 16-byte
 | filter block (TYPE long at +8, but we read TYPE from fw_voice_params
@@ -105,10 +108,10 @@ digifilter_dn_dispatch:
         adda.l  %d1, %a0
         move.w  126(%a0), %d1
         lsr.l   #8, %d1
-        andi.l  #0xff, %d1              | TYPE 0..9
+        andi.l  #0xff, %d1              | TYPE 0..10
         cmpi.l  #4, %d1
         blt.s   .Ldn_stock
-        cmpi.l  #10, %d1
+        cmpi.l  #11, %d1
         bge.s   .Ldn_stock
         lea     digifilter_dn_filt, %a5 | our TYPE: run our DSP
         bra.s   .Ldn_out

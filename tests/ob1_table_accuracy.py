@@ -43,13 +43,13 @@ void ob1_test_snapshot(void) {
 
 
 def build(folder, name, define=None):
-    source = (ROOT / 'ob1_vcf.c').read_text()
+    source = (ROOT / 'shared' / 'ob1_vcf.c').read_text()
     file = folder / (name + '.c')
     file.write_text(source + SNAPSHOT)
     elf = folder / (name + '.elf')
     cmd = ['m68k-elf-gcc', '-mcpu=54455', '-O2', '-ffreestanding',
            '-fno-builtin', '-nostdlib', '-fomit-frame-pointer', '-Wall',
-           '-I', str(ROOT), str(file), '-Wl,-Ttext=0x10000',
+           '-I', str(ROOT), '-I', str(ROOT / 'shared'), str(file), '-Wl,-Ttext=0x10000',
            '-Wl,-e,ob1_vcf_run', '-o', str(elf)]
     if define:
         cmd.insert(2, define)

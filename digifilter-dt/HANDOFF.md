@@ -1,5 +1,8 @@
 # DigiFilter — handoff (session 3)
 
+> **Historical (pre-1.2) note.** The current mod targets OS 1.54 only; see
+> [README.md](README.md). The 1.53 instructions below are kept for history.
+
 Per-track filter modes for the **Digitakt mk1, OS 1.53**: `BP`, `BP2`, `COMB`,
 `TRASH` (TYPE 8–11). The audio path, filter envelope, second FLTR page, response
 curve and TYPE glyph were done in sessions 1–2 (1.0h–1.0i). This session is

@@ -28,7 +28,7 @@ def position(hz):
 
 
 def main():
-    assert (Path(C.ROOT) / 'ob1_tables.h').read_text() == M.table_c(), 'stale generated tables'
+    assert (Path(C.ROOT) / 'shared' / 'ob1_tables.h').read_text() == M.table_c(), 'stale generated tables'
     so = C.build()
     t = np.arange(2 * RATE) / RATE
     for tap in (4, 2):
